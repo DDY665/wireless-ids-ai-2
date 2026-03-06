@@ -7,9 +7,8 @@ function ChatInterface({ alertId = null, alertContext = null }) {
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef(null);
 
-  // Auto-scroll to bottom when new messages arrive
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
   };
 
   useEffect(() => {
@@ -103,10 +102,12 @@ function ChatInterface({ alertId = null, alertContext = null }) {
 
   return (
     <div style={styles.container}>
-      {/* Alert Context Card (if alert is selected) */}
       {alertContext && (
         <div style={styles.alertContext}>
-          <h4 style={styles.alertTitle}>📡 Alert Context</h4>
+          <h4 style={styles.alertTitle}>
+            <span>🎯</span>
+            ALERT CONTEXT
+          </h4>
           <div style={styles.alertDetails}>
             <span style={styles.alertBadge}>{alertContext.type}</span>
             <span style={styles.alertInfo}>
@@ -121,7 +122,6 @@ function ChatInterface({ alertId = null, alertContext = null }) {
         </div>
       )}
 
-      {/* Chat Messages */}
       <div style={styles.chatWindow}>
         {messages.map((msg, i) => (
           <div
@@ -141,7 +141,6 @@ function ChatInterface({ alertId = null, alertContext = null }) {
               {msg.role === "assistant" ? (
                 <ReactMarkdown
                   components={{
-                    // Style markdown elements
                     p: ({ children }) => (
                       <p style={{ margin: "0.5em 0" }}>{children}</p>
                     ),
@@ -180,12 +179,11 @@ function ChatInterface({ alertId = null, alertContext = null }) {
 
         {loading && (
           <div style={styles.messageContainer}>
-            <div style={{ ...styles.message, ...styles.aiMessage }}>
-              <div style={styles.typingIndicator}>
-                <span></span>
-                <span></span>
-                <span></span>
-              </div>
+            <div style={styles.loadingIndicator}>
+              <div style={styles.loadingDot} />
+              <div style={{...styles.loadingDot, animationDelay: "0.2s"}} />
+              <div style={{...styles.loadingDot, animationDelay: "0.4s"}} />
+              <span>AI is analyzing...</span>
             </div>
           </div>
         )}
@@ -193,14 +191,13 @@ function ChatInterface({ alertId = null, alertContext = null }) {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area */}
       <div style={styles.inputContainer}>
         <textarea
           style={styles.input}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyPress={handleKeyPress}
-          placeholder="Ask a question about this attack or wireless security..."
+          placeholder="💬 Ask about this threat, mitigation steps, or network security best practices..."
           rows={2}
           disabled={loading}
         />
@@ -212,7 +209,7 @@ function ChatInterface({ alertId = null, alertContext = null }) {
           onClick={sendMessage}
           disabled={loading || !input.trim()}
         >
-          {loading ? "⏳" : "Send"}
+          {loading ? "⏳ Analyzing..." : "↗ Send"}
         </button>
       </div>
     </div>
@@ -224,174 +221,188 @@ const styles = {
     display: "flex",
     flexDirection: "column",
     height: "100%",
-    backgroundColor: "#0d1117",
-    borderRadius: "8px",
+    background: "#0f172a",
     overflow: "hidden"
   },
   alertContext: {
-    padding: "16px",
-    backgroundColor: "#161b22",
-    borderBottom: "1px solid #30363d"
+    padding: "20px 24px",
+    background: "linear-gradient(135deg, #1e293b 0%, #334155 100%)",
+    borderBottom: "1px solid #334155",
+    boxShadow: "0 2px 8px rgba(0, 0, 0, 0.2)"
   },
   alertTitle: {
     margin: "0 0 12px 0",
-    color: "#58a6ff",
+    color: "#f1f5f9",
     fontSize: "14px",
-    fontWeight: "600"
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: "0.5px",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px"
   },
   alertDetails: {
     display: "flex",
-    gap: "8px",
-    flexWrap: "wrap"
+    gap: "10px",
+    flexWrap: "wrap",
+    alignItems: "center"
   },
   alertBadge: {
-    padding: "4px 8px",
-    backgroundColor: "#da3633",
-    color: "#fff",
-    borderRadius: "4px",
-    fontSize: "12px",
-    fontWeight: "600"
+    padding: "8px 14px",
+    background: "#1e40af",
+    color: "#dbeafe",
+    border: "1px solid #3b82f6",
+    fontWeight: "700",
+    borderRadius: "8px",
+    fontSize: "14px",
+    letterSpacing: "0.3px"
   },
   alertInfo: {
-    padding: "4px 8px",
-    backgroundColor: "#21262d",
-    color: "#8b949e",
-    borderRadius: "4px",
-    fontSize: "12px"
+    padding: "8px 14px",
+    background: "#0f172a",
+    color: "#94a3b8",
+    borderRadius: "8px",
+    border: "1px solid #334155",
+    fontSize: "13px",
+    fontFamily: "'SF Mono', 'Monaco', 'Courier New', monospace"
   },
   mitreBadge: {
-    padding: "4px 8px",
-    backgroundColor: "#1f6feb",
-    color: "#fff",
-    borderRadius: "4px",
-    fontSize: "11px",
-    fontWeight: "500"
+    padding: "8px 14px",
+    background: "#14532d",
+    color: "#86efac",
+    border: "1px solid #166534",
+    borderRadius: "8px",
+    fontSize: "12px",
+    fontWeight: "600",
+    fontFamily: "'SF Mono', 'Monaco', 'Courier New', monospace"
   },
   chatWindow: {
     flex: 1,
     overflowY: "auto",
-    padding: "20px",
+    padding: "24px",
     display: "flex",
     flexDirection: "column",
-    gap: "16px"
+    gap: "16px",
+    background: "#0f172a"
   },
   messageContainer: {
     display: "flex",
-    width: "100%"
+    width: "100%",
+    marginBottom: "4px"
   },
   message: {
     maxWidth: "75%",
-    padding: "12px 16px",
+    padding: "14px 18px",
     borderRadius: "12px",
     fontSize: "14px",
-    lineHeight: "1.5",
-    position: "relative",
-    wordWrap: "break-word"
+    lineHeight: "1.6",
+    wordWrap: "break-word",
+    boxShadow: "0 2px 8px rgba(0, 0, 0, 0.2)"
   },
   userMessage: {
-    backgroundColor: "#1f6feb",
-    color: "#ffffff"
+    background: "linear-gradient(135deg, #1e40af 0%, #3b82f6 100%)",
+    color: "#f0f9ff",
+    border: "1px solid #3b82f6",
+    borderRadius: "12px 12px 4px 12px"
   },
   aiMessage: {
-    backgroundColor: "#21262d",
-    color: "#c9d1d9"
+    background: "#1e293b",
+    color: "#e2e8f0",
+    border: "1px solid #334155",
+    borderRadius: "12px 12px 12px 4px"
   },
   errorMessage: {
-    backgroundColor: "#da3633",
-    color: "#ffffff"
+    background: "#7f1d1d",
+    color: "#fecaca",
+    border: "1px solid #991b1b"
   },
   timestamp: {
-    fontSize: "10px",
-    opacity: 0.6,
-    marginTop: "6px",
-    textAlign: "right"
+    fontSize: "11px",
+    color: "#64748b",
+    marginTop: "8px",
+    fontWeight: "500"
   },
   code: {
-    fontFamily: "Consolas, Monaco, 'Courier New', monospace",
+    fontFamily: "'SF Mono', 'Monaco', 'Courier New', monospace",
     fontSize: "13px"
   },
   inlineCode: {
-    backgroundColor: "#161b22",
+    background: "#334155",
+    color: "#a78bfa",
     padding: "2px 6px",
-    borderRadius: "3px",
-    border: "1px solid #30363d"
+    borderRadius: "4px",
+    border: "1px solid #475569"
   },
   blockCode: {
-    display: "block",
-    backgroundColor: "#161b22",
+    background: "#0f172a",
+    color: "#94a3b8",
     padding: "12px",
     borderRadius: "6px",
-    border: "1px solid #30363d",
+    display: "block",
     overflowX: "auto",
-    margin: "8px 0"
-  },
-  typingIndicator: {
-    display: "flex",
-    gap: "4px",
-    padding: "4px 0"
+    border: "1px solid #334155"
   },
   inputContainer: {
+    padding: "20px 24px",
+    background: "#1e293b",
+    borderTop: "1px solid #334155",
     display: "flex",
     gap: "12px",
-    padding: "16px",
-    backgroundColor: "#161b22",
-    borderTop: "1px solid #30363d"
+    alignItems: "flex-end",
+    boxShadow: "0 -2px 8px rgba(0, 0, 0, 0.2)"
   },
   input: {
     flex: 1,
-    backgroundColor: "#0d1117",
-    color: "#c9d1d9",
-    border: "1px solid #30363d",
-    borderRadius: "6px",
-    padding: "12px",
+    background: "#0f172a",
+    border: "1px solid #334155",
+    borderRadius: "10px",
+    padding: "12px 16px",
+    color: "#e2e8f0",
     fontSize: "14px",
     fontFamily: "inherit",
     resize: "none",
-    outline: "none"
+    outline: "none",
+    lineHeight: "1.5",
+    transition: "border-color 0.2s"
   },
   sendButton: {
-    backgroundColor: "#238636",
+    background: "linear-gradient(135deg, #3b82f6 0%, #6366f1 100%)",
     color: "#ffffff",
     border: "none",
-    borderRadius: "6px",
-    padding: "12px 24px",
+    borderRadius: "10px",
+    padding: "12px 28px",
     cursor: "pointer",
     fontSize: "14px",
-    fontWeight: "600",
-    transition: "background-color 0.2s"
+    fontWeight: "700",
+    transition: "all 0.2s",
+    boxShadow: "0 2px 8px rgba(59, 130, 246, 0.3)",
+    letterSpacing: "0.3px"
   },
   sendButtonDisabled: {
-    backgroundColor: "#21262d",
-    color: "#6e7681",
-    cursor: "not-allowed"
+    background: "#334155",
+    color: "#64748b",
+    cursor: "not-allowed",
+    boxShadow: "none"
+  },
+  loadingIndicator: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    padding: "14px 18px",
+    background: "#1e293b",
+    borderRadius: "12px 12px 12px 4px",
+    border: "1px solid #334155",
+    color: "#94a3b8",
+    fontSize: "14px",
+    maxWidth: "75%"
+  },
+  loadingDot: {
+    width: "8px",
+    height: "8px",
+    borderRadius: "50%",
+    background: "#60a5fa",
+    animation: "pulse 1.5s ease-in-out infinite"
   }
 };
-
-// Add CSS for typing indicator animation
-const styleSheet = document.createElement("style");
-styleSheet.textContent = `
-  @keyframes blink {
-    0%, 80%, 100% { opacity: 0; }
-    40% { opacity: 1; }
-  }
-  
-  div[style*="typingIndicator"] span {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    background-color: #8b949e;
-    border-radius: 50%;
-    animation: blink 1.4s infinite;
-  }
-  
-  div[style*="typingIndicator"] span:nth-child(2) {
-    animation-delay: 0.2s;
-  }
-  
-  div[style*="typingIndicator"] span:nth-child(3) {
-    animation-delay: 0.4s;
-  }
-`;
-document.head.appendChild(styleSheet);
 
 export default ChatInterface;

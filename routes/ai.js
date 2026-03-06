@@ -5,16 +5,21 @@ import mongoose from "mongoose";
 
 const router = express.Router();
 
-/*
-Initialize Groq client with validation
-*/
-if (!process.env.GROQ_API_KEY) {
-  console.error("⚠️  GROQ_API_KEY not found in environment variables");
-}
+let groqClient = null;
 
-const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY || "dummy-key"
-});
+function getGroqClient() {
+  const apiKey = process.env.GROQ_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("GROQ_API_KEY_MISSING");
+  }
+
+  if (!groqClient) {
+    groqClient = new Groq({ apiKey });
+  }
+
+  return groqClient;
+}
 
 /*
 Helper: Validate MongoDB ObjectId
@@ -27,26 +32,21 @@ function isValidObjectId(id) {
 Helper: Call Groq API with timeout and error handling
 */
 async function callGroqWithTimeout(messages, timeoutMs = 30000) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const groq = getGroqClient();
 
-  try {
-    const completion = await groq.chat.completions.create({
-      model: "llama-3.1-8b-instant",
-      messages,
-      temperature: 0.7,
-      max_tokens: 1024,
-    });
+  const completionPromise = groq.chat.completions.create({
+    model: "llama-3.1-8b-instant",
+    messages,
+    temperature: 0.7,
+    max_tokens: 1024,
+  });
 
-    clearTimeout(timeout);
-    return completion.choices[0].message.content;
-  } catch (err) {
-    clearTimeout(timeout);
-    if (err.name === 'AbortError') {
-      throw new Error("AI request timed out");
-    }
-    throw err;
-  }
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error("AI request timed out")), timeoutMs);
+  });
+
+  const completion = await Promise.race([completionPromise, timeoutPromise]);
+  return completion.choices[0].message.content;
 }
 
 
@@ -130,7 +130,7 @@ Current Alert Context:
       });
     }
 
-    if (err.message?.includes("API key")) {
+    if (err.message === "GROQ_API_KEY_MISSING" || err.message?.includes("API key")) {
       return res.status(503).json({
         error: "AI service configuration error"
       });
@@ -203,6 +203,12 @@ Explain clearly:
       });
     }
 
+    if (err.message === "GROQ_API_KEY_MISSING") {
+      return res.status(503).json({
+        error: "AI service configuration error"
+      });
+    }
+
     res.status(500).json({
       error: "Failed to generate explanation",
       details: process.env.NODE_ENV === 'development' ? err.message : undefined
@@ -262,6 +268,12 @@ Description: ${alert.mitre?.description}`;
     if (err.message === "AI request timed out") {
       return res.status(504).json({
         error: "AI service timed out. Please try again."
+      });
+    }
+
+    if (err.message === "GROQ_API_KEY_MISSING") {
+      return res.status(503).json({
+        error: "AI service configuration error"
       });
     }
 

@@ -1,6 +1,7 @@
 import express from "express";
 import Alert from "../models/Alert.js";
 import mongoose from "mongoose";
+import { mapToMitre, getAvailableMappings } from "../services/mitreService.js";
 
 const router = express.Router();
 
@@ -14,28 +15,87 @@ function isValidObjectId(id) {
 // TEST ALERT ROUTE (must be first)
 router.get("/test", async (req, res) => {
   try {
+    const requestedType = (req.query.type || "DEAUTHFLOOD").toString().toUpperCase();
+    const signal = Number.isFinite(Number(req.query.signal)) ? Number(req.query.signal) : -42;
+    const mitre = mapToMitre(requestedType);
+
     const alert = await Alert.create({
-      type: "DEAUTHFLOOD",
+      type: requestedType,
       source_mac: "AA:BB:CC:DD:EE:01",
       dest_mac: "FF:FF:FF:FF:FF:FF",
       bssid: "11:22:33:44:55:66",
-      signal: -42,
+      signal,
       timestamp: new Date(),
-
-      mitre: {
-        technique_id: "T1499",
-        name: "Endpoint Denial of Service",
-        tactic: "impact",
-        description: "Adversaries may perform DoS attacks."
-      }
+      mitre
     });
 
-    res.json({ success: true, alert });
+    res.json({
+      success: true,
+      message: "Dummy alert created",
+      alert,
+      availableTypes: getAvailableMappings()
+    });
   } catch (err) {
     console.error("Test alert creation failed:", err);
     res.status(500).json({ 
       error: "Failed to create test alert",
       details: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+});
+
+// BULK TEST ALERT ROUTE
+router.post("/test/bulk", async (req, res) => {
+  try {
+    const requestedTypes = Array.isArray(req.body?.types) && req.body.types.length
+      ? req.body.types.map((t) => String(t).toUpperCase())
+      : getAvailableMappings();
+
+    const created = [];
+
+    for (const type of requestedTypes) {
+      const mitre = mapToMitre(type);
+
+      const alert = await Alert.create({
+        type,
+        source_mac: "AA:BB:CC:DD:EE:01",
+        dest_mac: "FF:FF:FF:FF:FF:FF",
+        bssid: "11:22:33:44:55:66",
+        signal: -35 - Math.floor(Math.random() * 40),
+        timestamp: new Date(),
+        mitre
+      });
+
+      created.push(alert);
+    }
+
+    res.json({
+      success: true,
+      count: created.length,
+      alerts: created
+    });
+  } catch (err) {
+    console.error("Bulk test alert creation failed:", err);
+    res.status(500).json({
+      error: "Failed to create bulk test alerts",
+      details: process.env.NODE_ENV === "development" ? err.message : undefined
+    });
+  }
+});
+
+// CLEAR ALL ALERTS (testing utility)
+router.delete("/reset", async (req, res) => {
+  try {
+    const result = await Alert.deleteMany({});
+    res.json({
+      success: true,
+      deletedCount: result.deletedCount
+    });
+  } catch (err) {
+    console.error("Failed to clear alerts:", err);
+    res.status(500).json({
+      error: "Failed to clear alerts",
+      details: process.env.NODE_ENV === "development" ? err.message : undefined
     });
   }
 });
