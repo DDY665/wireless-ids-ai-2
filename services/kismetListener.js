@@ -1,6 +1,7 @@
 import WebSocket from "ws";
 import Alert from "../models/Alert.js";
 import { mapToMitre } from "./mitreService.js";
+import { scoreAlertSeverity } from "./severityService.js";
 
 let reconnectTimeout;
 let ws;
@@ -59,14 +60,26 @@ function connectToKismet(io, retryCount = 0) {
         }
 
         const mitre = mapToMitre(data.alert);
+        const signal = Number.isFinite(Number(data.signal)) ? Number(data.signal) : 0;
+        const severity = scoreAlertSeverity({
+          type: data.alert,
+          signal,
+          occurrenceCount: 1
+        });
 
         const alert = await Alert.create({
           type: data.alert,
           source_mac: data.source_mac || "Unknown",
           dest_mac: data.dest_mac || "Unknown",
           bssid: data.bssid || "Unknown",
-          signal: data.signal || 0,
+          signal,
           timestamp: new Date(),
+          source: "kismet",
+          firstSeen: new Date(),
+          lastSeen: new Date(),
+          occurrenceCount: 1,
+          severityScore: severity.severityScore,
+          severityLevel: severity.severityLevel,
           mitre
         });
 

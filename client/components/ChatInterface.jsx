@@ -7,6 +7,14 @@ function ChatInterface({ alertId = null, alertContext = null }) {
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef(null);
 
+  const buildWelcomeMessage = () => {
+    if (alertId && alertContext) {
+      return `Hello! I'm your cybersecurity assistant. I can help you understand the **${alertContext.type}** attack detected. Ask me anything!`;
+    }
+
+    return "Hello! I'm your cybersecurity assistant. Ask me about wireless security, intrusion detection, or any security questions you have!";
+  };
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
   };
@@ -15,19 +23,58 @@ function ChatInterface({ alertId = null, alertContext = null }) {
     scrollToBottom();
   }, [messages]);
 
-  // Add welcome message
+  // Load persisted conversation for selected alert; fallback to welcome message.
   useEffect(() => {
-    const welcomeMsg = alertId && alertContext
-      ? `Hello! I'm your cybersecurity assistant. I can help you understand the **${alertContext.type}** attack detected. Ask me anything!`
-      : "Hello! I'm your cybersecurity assistant. Ask me about wireless security, intrusion detection, or any security questions you have!";
+    let cancelled = false;
 
-    setMessages([
-      {
+    async function loadHistory() {
+      const welcomeMsg = {
         role: "assistant",
-        content: welcomeMsg,
+        content: buildWelcomeMessage(),
         timestamp: new Date()
+      };
+
+      if (!alertId) {
+        setMessages([welcomeMsg]);
+        return;
       }
-    ]);
+
+      try {
+        const res = await fetch(`http://localhost:5000/ai/chat-history/${alertId}`, {
+          signal: AbortSignal.timeout(10000)
+        });
+
+        if (!res.ok) {
+          throw new Error(`Failed to load history (${res.status})`);
+        }
+
+        const data = await res.json();
+        const historyMessages = Array.isArray(data.messages)
+          ? data.messages
+              .filter((msg) => msg?.role === "user" || msg?.role === "assistant")
+              .map((msg) => ({
+                role: msg.role,
+                content: msg.content,
+                timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date()
+              }))
+          : [];
+
+        if (!cancelled) {
+          setMessages(historyMessages.length ? historyMessages : [welcomeMsg]);
+        }
+      } catch (err) {
+        console.error("Failed to load chat history:", err);
+        if (!cancelled) {
+          setMessages([welcomeMsg]);
+        }
+      }
+    }
+
+    loadHistory();
+
+    return () => {
+      cancelled = true;
+    };
   }, [alertId, alertContext]);
 
   const sendMessage = async () => {

@@ -1,5 +1,6 @@
 import express from "express";
 import Alert from "../models/Alert.js";
+import Conversation from "../models/Conversation.js";
 import Groq from "groq-sdk";
 import mongoose from "mongoose";
 
@@ -47,6 +48,39 @@ async function callGroqWithTimeout(messages, timeoutMs = 30000) {
 
   const completion = await Promise.race([completionPromise, timeoutPromise]);
   return completion.choices[0].message.content;
+}
+
+async function persistConversationMessage(alertId, userMessage, assistantMessage) {
+  if (!alertId) return null;
+
+  const now = new Date();
+  const update = {
+    $push: {
+      messages: {
+        $each: [
+          { role: "user", content: userMessage, timestamp: now },
+          { role: "assistant", content: assistantMessage, timestamp: now }
+        ],
+        $slice: -100
+      }
+    },
+    $set: {
+      lastMessageAt: now
+    },
+    $inc: {
+      messageCount: 2
+    }
+  };
+
+  return Conversation.findOneAndUpdate(
+    { alertId },
+    update,
+    {
+      new: true,
+      upsert: true,
+      setDefaultsOnInsert: true
+    }
+  );
 }
 
 
@@ -115,9 +149,16 @@ Current Alert Context:
 
     const reply = await callGroqWithTimeout(messages);
 
+    let conversation = null;
+    if (alertId) {
+      conversation = await persistConversationMessage(alertId, message, reply);
+    }
+
     res.json({
       reply,
-      alertId: alertId || null
+      alertId: alertId || null,
+      conversationId: conversation?._id || null,
+      messageCount: conversation?.messageCount || null
     });
 
   } catch (err) {
@@ -143,10 +184,80 @@ Current Alert Context:
   }
 });
 
+/*
+------------------------------------------------
+2️⃣  CHAT HISTORY ENDPOINT
+GET /ai/chat-history/:alertId
+------------------------------------------------
+*/
+
+router.get("/chat-history/:alertId", async (req, res) => {
+  try {
+    const { alertId } = req.params;
+
+    if (!isValidObjectId(alertId)) {
+      return res.status(400).json({ error: "Invalid alert ID format" });
+    }
+
+    const conversation = await Conversation.findOne({ alertId }).lean();
+
+    if (!conversation) {
+      return res.json({
+        alertId,
+        messages: [],
+        messageCount: 0
+      });
+    }
+
+    return res.json({
+      conversationId: conversation._id,
+      alertId,
+      messages: conversation.messages || [],
+      messageCount: conversation.messageCount || 0,
+      lastMessageAt: conversation.lastMessageAt || null
+    });
+  } catch (err) {
+    console.error("Chat history fetch error:", err);
+    return res.status(500).json({
+      error: "Failed to fetch chat history",
+      details: process.env.NODE_ENV === "development" ? err.message : undefined
+    });
+  }
+});
 
 /*
 ------------------------------------------------
-2️⃣  EXPLAIN ATTACK ENDPOINT
+3️⃣  CLEAR CHAT HISTORY ENDPOINT
+DELETE /ai/chat-history/:alertId
+------------------------------------------------
+*/
+
+router.delete("/chat-history/:alertId", async (req, res) => {
+  try {
+    const { alertId } = req.params;
+
+    if (!isValidObjectId(alertId)) {
+      return res.status(400).json({ error: "Invalid alert ID format" });
+    }
+
+    const result = await Conversation.deleteOne({ alertId });
+    return res.json({
+      success: true,
+      deletedCount: result.deletedCount || 0
+    });
+  } catch (err) {
+    console.error("Chat history deletion error:", err);
+    return res.status(500).json({
+      error: "Failed to clear chat history",
+      details: process.env.NODE_ENV === "development" ? err.message : undefined
+    });
+  }
+});
+
+
+/*
+------------------------------------------------
+4️⃣  EXPLAIN ATTACK ENDPOINT
 GET /ai/explain/:id
 ------------------------------------------------
 */
@@ -219,7 +330,7 @@ Explain clearly:
 
 /*
 ------------------------------------------------
-3️⃣  LEGACY CHAT ENDPOINT (deprecated)
+5️⃣  LEGACY CHAT ENDPOINT (deprecated)
 POST /ai/chat/:id
 ------------------------------------------------
 */

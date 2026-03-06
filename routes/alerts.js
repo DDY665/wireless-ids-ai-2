@@ -2,6 +2,7 @@ import express from "express";
 import Alert from "../models/Alert.js";
 import mongoose from "mongoose";
 import { mapToMitre, getAvailableMappings } from "../services/mitreService.js";
+import { scoreAlertSeverity } from "../services/severityService.js";
 
 const router = express.Router();
 
@@ -18,6 +19,11 @@ router.get("/test", async (req, res) => {
     const requestedType = (req.query.type || "DEAUTHFLOOD").toString().toUpperCase();
     const signal = Number.isFinite(Number(req.query.signal)) ? Number(req.query.signal) : -42;
     const mitre = mapToMitre(requestedType);
+    const severity = scoreAlertSeverity({
+      type: requestedType,
+      signal,
+      occurrenceCount: 1
+    });
 
     const alert = await Alert.create({
       type: requestedType,
@@ -26,6 +32,12 @@ router.get("/test", async (req, res) => {
       bssid: "11:22:33:44:55:66",
       signal,
       timestamp: new Date(),
+      source: "simulated",
+      firstSeen: new Date(),
+      lastSeen: new Date(),
+      occurrenceCount: 1,
+      severityScore: severity.severityScore,
+      severityLevel: severity.severityLevel,
       mitre
     });
 
@@ -55,14 +67,26 @@ router.post("/test/bulk", async (req, res) => {
 
     for (const type of requestedTypes) {
       const mitre = mapToMitre(type);
+      const signal = -35 - Math.floor(Math.random() * 40);
+      const severity = scoreAlertSeverity({
+        type,
+        signal,
+        occurrenceCount: 1
+      });
 
       const alert = await Alert.create({
         type,
         source_mac: "AA:BB:CC:DD:EE:01",
         dest_mac: "FF:FF:FF:FF:FF:FF",
         bssid: "11:22:33:44:55:66",
-        signal: -35 - Math.floor(Math.random() * 40),
+        signal,
         timestamp: new Date(),
+        source: "simulated",
+        firstSeen: new Date(),
+        lastSeen: new Date(),
+        occurrenceCount: 1,
+        severityScore: severity.severityScore,
+        severityLevel: severity.severityLevel,
         mitre
       });
 
@@ -142,6 +166,47 @@ router.get("/:id", async (req, res) => {
     res.status(500).json({ 
       error: "Failed to fetch alert",
       details: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+});
+
+// UPDATE ALERT STATUS / NOTES
+router.patch("/:id/status", async (req, res) => {
+  try {
+    if (!isValidObjectId(req.params.id)) {
+      return res.status(400).json({ error: "Invalid alert ID format" });
+    }
+
+    const { status, analystNotes } = req.body || {};
+    const allowedStatuses = ["new", "triaged", "investigating", "resolved", "false_positive"];
+
+    if (!status || !allowedStatuses.includes(status)) {
+      return res.status(400).json({
+        error: "Invalid status",
+        allowedStatuses
+      });
+    }
+
+    const updated = await Alert.findByIdAndUpdate(
+      req.params.id,
+      {
+        status,
+        ...(typeof analystNotes === "string" ? { analystNotes } : {}),
+        lastSeen: new Date()
+      },
+      { new: true }
+    );
+
+    if (!updated) {
+      return res.status(404).json({ error: "Alert not found" });
+    }
+
+    res.json({ success: true, alert: updated });
+  } catch (err) {
+    console.error("Error updating alert status:", err);
+    res.status(500).json({
+      error: "Failed to update alert status",
+      details: process.env.NODE_ENV === "development" ? err.message : undefined
     });
   }
 });
