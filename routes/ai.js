@@ -3,6 +3,8 @@ import Alert from "../models/Alert.js";
 import Conversation from "../models/Conversation.js";
 import Groq from "groq-sdk";
 import mongoose from "mongoose";
+import { verifyResponseTruth } from "../services/truthVerifier.js";
+import { requireApiKey } from "../middleware/auth.js";
 
 const router = express.Router();
 
@@ -50,7 +52,80 @@ async function callGroqWithTimeout(messages, timeoutMs = 30000) {
   return completion.choices[0].message.content;
 }
 
-async function persistConversationMessage(alertId, userMessage, assistantMessage) {
+function parseStructuredReply(rawText) {
+  const fallback = {
+    answer: String(rawText || "").trim() || "I could not generate a valid response.",
+    claims: [],
+    unknowns: ["Response not returned in expected structure"]
+  };
+
+  try {
+    const cleaned = String(rawText || "")
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/```$/i, "")
+      .trim();
+
+    const parsed = JSON.parse(cleaned);
+
+    return {
+      answer: String(parsed.answer || "").trim() || fallback.answer,
+      claims: Array.isArray(parsed.claims)
+        ? parsed.claims.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 8)
+        : [],
+      unknowns: Array.isArray(parsed.unknowns)
+        ? parsed.unknowns.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 5)
+        : []
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function getLowConfidenceThreshold() {
+  const parsed = Number.parseFloat(process.env.TRUTH_CONFIDENCE_LOW || "0.55");
+  if (!Number.isFinite(parsed)) {
+    return 0.55;
+  }
+  return Math.max(0, Math.min(1, parsed));
+}
+
+function buildLowConfidenceSafeReply(alertContext, structured, originalMessage) {
+  const knownFacts = [
+    alertContext?.type ? `Attack Type: ${alertContext.type}` : null,
+    alertContext?.signal !== undefined ? `Signal: ${alertContext.signal} dBm` : null,
+    alertContext?.mitre?.technique_id ? `MITRE Technique: ${alertContext.mitre.technique_id}` : null,
+    alertContext?.mitre?.name ? `MITRE Name: ${alertContext.mitre.name}` : null
+  ].filter(Boolean);
+
+  const unknowns = [
+    ...(Array.isArray(structured.unknowns) ? structured.unknowns : []),
+    "Confidence is currently low for a definitive answer.",
+    "Please validate this interpretation with additional packet/context analysis."
+  ];
+
+  const answer = [
+    "I cannot provide a definitive answer with high confidence for this question yet.",
+    "",
+    "Known facts from current alert context:",
+    ...knownFacts.map((fact) => `- ${fact}`),
+    "",
+    "Recommended verification steps:",
+    "- Correlate this alert with nearby alerts in the same time window.",
+    "- Validate packet-level indicators in Kismet/Wireshark.",
+    "- Confirm whether the behavior is expected in your environment.",
+    "",
+    `Original question: ${originalMessage}`
+  ].join("\n");
+
+  return {
+    answer,
+    claims: knownFacts,
+    unknowns
+  };
+}
+
+async function persistConversationMessage(alertId, userMessage, assistantMessage, assistantMeta = {}) {
   if (!alertId) return null;
 
   const now = new Date();
@@ -59,7 +134,18 @@ async function persistConversationMessage(alertId, userMessage, assistantMessage
       messages: {
         $each: [
           { role: "user", content: userMessage, timestamp: now },
-          { role: "assistant", content: assistantMessage, timestamp: now }
+          {
+            role: "assistant",
+            content: assistantMessage,
+            claims: assistantMeta.claims || [],
+            unknowns: assistantMeta.unknowns || [],
+            evidence: assistantMeta.evidence || [],
+            confidenceScore: typeof assistantMeta.confidenceScore === "number" ? assistantMeta.confidenceScore : null,
+            confidenceLabel: assistantMeta.confidenceLabel || null,
+            verificationStatus: assistantMeta.verificationStatus || null,
+            needsAnalystValidation: Boolean(assistantMeta.needsAnalystValidation),
+            timestamp: now
+          }
         ],
         $slice: -100
       }
@@ -92,7 +178,7 @@ POST /ai/chat
 Supports conversation history and general questions
 */
 
-router.post("/chat", async (req, res) => {
+router.post("/chat", requireApiKey, async (req, res) => {
   try {
     const { message, history = [], alertId } = req.body;
 
@@ -105,29 +191,43 @@ router.post("/chat", async (req, res) => {
     // Build context from alert if provided
     let systemPrompt = "You are a helpful cybersecurity assistant specializing in wireless network security and intrusion detection. Provide clear, accurate, and educational responses.";
     let contextInfo = "";
+    let alertContext = null;
 
     if (alertId) {
       if (!isValidObjectId(alertId)) {
         return res.status(400).json({ error: "Invalid alert ID format" });
       }
 
-      const alert = await Alert.findById(alertId);
-      if (alert) {
+      alertContext = await Alert.findById(alertId).lean();
+      if (alertContext) {
         contextInfo = `
 
 Current Alert Context:
-- Attack Type: ${alert.type}
-- Signal Strength: ${alert.signal} dBm
-- MITRE Technique: ${alert.mitre?.technique_id} - ${alert.mitre?.name}
-- Description: ${alert.mitre?.description || 'N/A'}
-- Timestamp: ${alert.timestamp}
+- Attack Type: ${alertContext.type}
+- Signal Strength: ${alertContext.signal} dBm
+- MITRE Technique: ${alertContext.mitre?.technique_id} - ${alertContext.mitre?.name}
+- Description: ${alertContext.mitre?.description || 'N/A'}
+- Timestamp: ${alertContext.timestamp}
 `;
       }
     }
 
+    const structuredOutputInstruction = `
+
+Response Policy:
+- Be precise and avoid speculation.
+- If evidence is insufficient, explicitly say it in unknowns.
+- Return strict JSON only (no markdown, no code block) using this schema:
+  {
+    "answer": "string",
+    "claims": ["string"],
+    "unknowns": ["string"]
+  }
+`;
+
     // Build message history
     const messages = [
-      { role: "system", content: systemPrompt + contextInfo }
+      { role: "system", content: systemPrompt + contextInfo + structuredOutputInstruction }
     ];
 
     // Add conversation history (limit to last 10 messages)
@@ -147,18 +247,51 @@ Current Alert Context:
       content: message
     });
 
-    const reply = await callGroqWithTimeout(messages);
+    const rawReply = await callGroqWithTimeout(messages);
+    let structured = parseStructuredReply(rawReply);
+    let truth = verifyResponseTruth({
+      answer: structured.answer,
+      claims: structured.claims,
+      alert: alertContext
+    });
+
+    const lowConfidenceThreshold = getLowConfidenceThreshold();
+    if (truth.confidenceScore <= lowConfidenceThreshold) {
+      structured = buildLowConfidenceSafeReply(alertContext, structured, message);
+      truth = verifyResponseTruth({
+        answer: structured.answer,
+        claims: structured.claims,
+        alert: alertContext
+      });
+      truth.needsAnalystValidation = true;
+    }
 
     let conversation = null;
     if (alertId) {
-      conversation = await persistConversationMessage(alertId, message, reply);
+      conversation = await persistConversationMessage(alertId, message, structured.answer, {
+        ...truth,
+        claims: structured.claims,
+        unknowns: structured.unknowns
+      });
     }
 
     res.json({
-      reply,
+      reply: structured.answer,
       alertId: alertId || null,
       conversationId: conversation?._id || null,
-      messageCount: conversation?.messageCount || null
+      messageCount: conversation?.messageCount || null,
+      truth: {
+        confidenceScore: truth.confidenceScore,
+        confidenceLabel: truth.confidenceLabel,
+        verificationStatus: truth.verificationStatus,
+        needsAnalystValidation: truth.needsAnalystValidation,
+        claims: structured.claims,
+        unknowns: structured.unknowns,
+        evidence: truth.evidence,
+        contradictions: truth.contradictions,
+        thresholds: truth.thresholds,
+        lowConfidenceThreshold
+      }
     });
 
   } catch (err) {
@@ -191,7 +324,7 @@ GET /ai/chat-history/:alertId
 ------------------------------------------------
 */
 
-router.get("/chat-history/:alertId", async (req, res) => {
+router.get("/chat-history/:alertId", requireApiKey, async (req, res) => {
   try {
     const { alertId } = req.params;
 
@@ -232,7 +365,7 @@ DELETE /ai/chat-history/:alertId
 ------------------------------------------------
 */
 
-router.delete("/chat-history/:alertId", async (req, res) => {
+router.delete("/chat-history/:alertId", requireApiKey, async (req, res) => {
   try {
     const { alertId } = req.params;
 
@@ -262,7 +395,7 @@ GET /ai/explain/:id
 ------------------------------------------------
 */
 
-router.get("/explain/:id", async (req, res) => {
+router.get("/explain/:id", requireApiKey, async (req, res) => {
   try {
     if (!isValidObjectId(req.params.id)) {
       return res.status(400).json({ error: "Invalid alert ID format" });
@@ -335,7 +468,7 @@ POST /ai/chat/:id
 ------------------------------------------------
 */
 
-router.post("/chat/:id", async (req, res) => {
+router.post("/chat/:id", requireApiKey, async (req, res) => {
   try {
     if (!isValidObjectId(req.params.id)) {
       return res.status(400).json({ error: "Invalid alert ID format" });

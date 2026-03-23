@@ -19,6 +19,24 @@ A real-time wireless intrusion detection system that monitors network attacks, m
 - Database connection monitoring with auto-reconnect
 - WebSocket reconnection with exponential backoff
 - Input sanitization and validation
+- Optional API-key access control for sensitive endpoints
+
+### API Key Access Control
+The backend supports optional API-key protection for write and AI endpoints.
+
+Environment variables:
+- `SECURITY_ENFORCE_API_KEY=true|false` (default `false`)
+- `SECURITY_API_KEY=<your-secret-key>`
+
+Protected endpoints when enabled:
+- `/alerts/test`
+- `/alerts/test/bulk`
+- `/alerts/reset`
+- `/alerts/:id/status`
+- `/ai/*`
+
+Frontend support:
+- Set `VITE_SECURITY_API_KEY` in `client/.env` to automatically send `x-api-key`.
 
 ## 🏗️ Architecture
 
@@ -184,7 +202,63 @@ npm run dev
    - Error banners
    - Tactic color coding
 
-## 🔒 Security Considerations
+## � Production Reliability
+
+The backend includes comprehensive production-ready features:
+
+### Health & Readiness Probes
+- **GET /health** - Liveness probe (always 200 if server running)
+  ```json
+  {
+    "status": "alive",
+    "timestamp": "2025-03-22T10:30:00.000Z",
+    "uptime": 3600,
+    "memory": {...}
+  }
+  ```
+- **GET /ready** - Readiness probe (200 only if database connected)
+  ```json
+  {
+    "status": "ready",
+    "timestamp": "2025-03-22T10:30:00.000Z",
+    "database": "connected",
+    "uptime": 3600
+  }
+  ```
+
+### Request Logging
+- Structured JSON logging of all HTTP requests
+- Includes: method, path, status code, duration, IP, user-agent
+- Error logging with stack traces in development mode
+- Useful for debugging, monitoring, and audit trails
+
+### Standardized Error Responses
+All errors return consistent JSON envelope:
+```json
+{
+  "status": "error",
+  "error": "ValidationError",
+  "message": "validation failed",
+  "details": [...],
+  "timestamp": "2025-03-22T10:30:00.000Z"
+}
+```
+
+### Graceful Shutdown
+- Tracks active connections
+- Stops accepting new connections on SIGTERM/SIGINT
+- Waits up to 30 seconds for graceful close
+- Force-kills if timeout exceeded
+- Structured shutdown logging
+
+### Container/Orchestration Readiness
+Perfect for Kubernetes, Docker Compose, or cloud deployments:
+- Use `/health` as liveness probe
+- Use `/ready` as readiness probe
+- Monitor structured JSON logs
+- Graceful shutdown with connection draining
+
+## �🔒 Security Considerations
 
 ### Current Implementation
 - Input validation on all endpoints
@@ -253,6 +327,14 @@ GROQ_API_KEY=your_groq_api_key
 MONGODB_URI=mongodb://127.0.0.1:27017/wirelessIDS
 NODE_ENV=production
 PORT=5000
+ENABLE_KISMET=false
+
+# One-dongle Kismet tuning
+SINGLE_DONGLE_MODE=false
+MIN_SIGNAL_DBM=-85
+DEDUPE_WINDOW_SECONDS=8
+# Optional CSV override for event types
+# KISMET_ALLOWED_ALERTS=DEAUTHFLOOD,DISASSOCFLOOD,BEACONFLOOD
 ```
 
 ## 🐛 Troubleshooting
@@ -271,6 +353,13 @@ PORT=5000
 - Verify Kismet is running: `kismet`
 - Check WebSocket endpoint: `ws://localhost:2501/alerts/alerts.ws`
 - System will retry automatically with exponential backoff
+
+### Single USB dongle tuning
+- Set `ENABLE_KISMET=true` to enable live ingestion.
+- Set `SINGLE_DONGLE_MODE=true` to reduce noise and missed-event impact.
+- Keep `MIN_SIGNAL_DBM` around `-85` for cleaner detections in noisy RF environments.
+- Keep `DEDUPE_WINDOW_SECONDS` around `5-10` to merge burst duplicates.
+- Lock Kismet capture to your target AP channel for best single-dongle results.
 
 ### AI responses not working
 - Verify GROQ_API_KEY is valid

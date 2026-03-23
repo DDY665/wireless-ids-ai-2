@@ -3,18 +3,125 @@ import Alert from "../models/Alert.js";
 import mongoose from "mongoose";
 import { mapToMitre, getAvailableMappings } from "../services/mitreService.js";
 import { scoreAlertSeverity } from "../services/severityService.js";
+import { requireApiKey } from "../middleware/auth.js";
 
 const router = express.Router();
 
+// CORRELATION WINDOW: 5 minutes
+const CORRELATION_WINDOW_MS = 5 * 60 * 1000;
 
 // Helper: Validate MongoDB ObjectId
 function isValidObjectId(id) {
   return mongoose.Types.ObjectId.isValid(id);
 }
 
+export function buildAlertsQuery(rawQuery = {}) {
+  const query = {};
+
+  if (rawQuery.status && rawQuery.status !== "all") {
+    query.status = rawQuery.status;
+  }
+
+  if (rawQuery.severityLevel && rawQuery.severityLevel !== "all") {
+    query.severityLevel = rawQuery.severityLevel;
+  }
+
+  if (rawQuery.type && rawQuery.type !== "all") {
+    query.type = String(rawQuery.type).toUpperCase();
+  }
+
+  if (rawQuery.source && rawQuery.source !== "all") {
+    query.source = rawQuery.source;
+  }
+
+  if (rawQuery.mitreTechnique && rawQuery.mitreTechnique !== "all") {
+    query["mitre.technique_id"] = String(rawQuery.mitreTechnique).toUpperCase();
+  }
+
+  if (rawQuery.correlatedOnly === "true") {
+    query.correlationCount = { $gt: 1 };
+  }
+
+  const search = typeof rawQuery.search === "string" ? rawQuery.search.trim() : "";
+  if (search) {
+    const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(escaped, "i");
+    query.$or = [
+      { type: regex },
+      { source_mac: regex },
+      { dest_mac: regex },
+      { bssid: regex },
+      { "mitre.technique_id": regex },
+      { "mitre.name": regex }
+    ];
+  }
+
+  return query;
+}
+
+/**
+ * Find correlated alerts for a given alert
+ * Correlates by: type, source_mac, dest_mac, bssid, within time window
+ */
+async function findCorrelatedAlerts(alert, timeWindowMs = CORRELATION_WINDOW_MS) {
+  const timeWindow = new Date(alert.timestamp.getTime() - timeWindowMs);
+
+  return Alert.find({
+    type: alert.type,
+    source_mac: alert.source_mac,
+    dest_mac: alert.dest_mac,
+    bssid: alert.bssid,
+    timestamp: {
+      $gte: timeWindow,
+      $lte: new Date(alert.timestamp.getTime() + timeWindowMs)
+    }
+  }).sort({ timestamp: 1 });
+}
+
+/**
+ * Create or update correlation group
+ * Assigns same correlationId to all related alerts
+ */
+async function updateAlertCorrelation(alert) {
+  const relatedAlerts = await findCorrelatedAlerts(alert);
+
+  if (relatedAlerts.length <= 1) {
+    // Single alert, no correlation needed
+    await Alert.findByIdAndUpdate(alert._id, {
+      correlationId: null,
+      correlationCount: 1
+    });
+    return alert;
+  }
+
+  // Create or use existing correlationId
+  let correlationId = alert.correlationId || `corr_${new Date().getTime()}_${Math.random().toString(36).substring(7)}`;
+
+  // Update all related alerts with same correlationId and count
+  await Alert.updateMany(
+    {
+      type: alert.type,
+      source_mac: alert.source_mac,
+      dest_mac: alert.dest_mac,
+      bssid: alert.bssid,
+      timestamp: {
+        $gte: new Date(alert.timestamp.getTime() - CORRELATION_WINDOW_MS),
+        $lte: new Date(alert.timestamp.getTime() + CORRELATION_WINDOW_MS)
+      }
+    },
+    {
+      correlationId,
+      correlationCount: relatedAlerts.length
+    }
+  );
+
+  return Alert.findById(alert._id);
+}
+
+
 
 // TEST ALERT ROUTE (must be first)
-router.get("/test", async (req, res) => {
+router.get("/test", requireApiKey, async (req, res) => {
   try {
     const requestedType = (req.query.type || "DEAUTHFLOOD").toString().toUpperCase();
     const signal = Number.isFinite(Number(req.query.signal)) ? Number(req.query.signal) : -42;
@@ -41,15 +148,18 @@ router.get("/test", async (req, res) => {
       mitre
     });
 
+    // Apply correlation
+    const correlatedAlert = await updateAlertCorrelation(alert);
+
     res.json({
       success: true,
       message: "Dummy alert created",
-      alert,
+      alert: correlatedAlert,
       availableTypes: getAvailableMappings()
     });
   } catch (err) {
     console.error("Test alert creation failed:", err);
-    res.status(500).json({ 
+    res.status(500).json({
       error: "Failed to create test alert",
       details: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
@@ -57,7 +167,7 @@ router.get("/test", async (req, res) => {
 });
 
 // BULK TEST ALERT ROUTE
-router.post("/test/bulk", async (req, res) => {
+router.post("/test/bulk", requireApiKey, async (req, res) => {
   try {
     const requestedTypes = Array.isArray(req.body?.types) && req.body.types.length
       ? req.body.types.map((t) => String(t).toUpperCase())
@@ -90,7 +200,9 @@ router.post("/test/bulk", async (req, res) => {
         mitre
       });
 
-      created.push(alert);
+      // Apply correlation
+      const correlatedAlert = await updateAlertCorrelation(alert);
+      created.push(correlatedAlert);
     }
 
     res.json({
@@ -108,7 +220,7 @@ router.post("/test/bulk", async (req, res) => {
 });
 
 // CLEAR ALL ALERTS (testing utility)
-router.delete("/reset", async (req, res) => {
+router.delete("/reset", requireApiKey, async (req, res) => {
   try {
     const result = await Alert.deleteMany({});
     res.json({
@@ -130,8 +242,9 @@ router.get("/", async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit) || 50, 200);
     const skip = parseInt(req.query.skip) || 0;
+    const query = buildAlertsQuery(req.query);
 
-    const alerts = await Alert.find()
+    const alerts = await Alert.find(query)
       .sort({ timestamp: -1 })
       .limit(limit)
       .skip(skip);
@@ -139,7 +252,7 @@ router.get("/", async (req, res) => {
     res.json(alerts);
   } catch (err) {
     console.error("Error fetching alerts:", err);
-    res.status(500).json({ 
+    res.status(500).json({
       error: "Failed to fetch alerts",
       details: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
@@ -163,15 +276,55 @@ router.get("/:id", async (req, res) => {
     res.json(alert);
   } catch (err) {
     console.error("Error fetching alert:", err);
-    res.status(500).json({ 
+    res.status(500).json({
       error: "Failed to fetch alert",
       details: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
 
+// GET CORRELATED ALERTS FOR A GIVEN ALERT
+router.get("/:id/correlation", async (req, res) => {
+  try {
+    if (!isValidObjectId(req.params.id)) {
+      return res.status(400).json({ error: "Invalid alert ID format" });
+    }
+
+    const alert = await Alert.findById(req.params.id);
+
+    if (!alert) {
+      return res.status(404).json({ error: "Alert not found" });
+    }
+
+    if (!alert.correlationId) {
+      return res.json({
+        correlationId: null,
+        count: 1,
+        alerts: [alert]
+      });
+    }
+
+    const correlatedAlerts = await Alert.find({
+      correlationId: alert.correlationId
+    }).sort({ timestamp: -1 });
+
+    res.json({
+      correlationId: alert.correlationId,
+      count: correlatedAlerts.length,
+      alerts: correlatedAlerts
+    });
+  } catch (err) {
+    console.error("Error fetching correlated alerts:", err);
+    res.status(500).json({
+      error: "Failed to fetch correlated alerts",
+      details: process.env.NODE_ENV === "development" ? err.message : undefined
+    });
+  }
+});
+
+
 // UPDATE ALERT STATUS / NOTES
-router.patch("/:id/status", async (req, res) => {
+router.patch("/:id/status", requireApiKey, async (req, res) => {
   try {
     if (!isValidObjectId(req.params.id)) {
       return res.status(400).json({ error: "Invalid alert ID format" });

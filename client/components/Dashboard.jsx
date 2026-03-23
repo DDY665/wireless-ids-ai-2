@@ -1,6 +1,17 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { io } from "socket.io-client";
 import ChatInterface from "./ChatInterface";
+import { withSecurityHeaders } from "../src/apiSecurity";
+
+const DEFAULT_FILTERS = {
+  status: "all",
+  severityLevel: "all",
+  type: "all",
+  source: "all",
+  mitreTechnique: "",
+  search: "",
+  correlatedOnly: false
+};
 
 function Dashboard() {
   const [alerts, setAlerts] = useState([]);
@@ -10,26 +21,56 @@ function Dashboard() {
   const [error, setError] = useState("");
   const [socketConnected, setSocketConnected] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [filters, setFilters] = useState(DEFAULT_FILTERS);
 
-  async function fetchAlerts() {
+  const hasActiveFilters =
+    filters.status !== "all" ||
+    filters.severityLevel !== "all" ||
+    filters.type !== "all" ||
+    filters.source !== "all" ||
+    Boolean(filters.mitreTechnique.trim()) ||
+    Boolean(filters.search.trim()) ||
+    filters.correlatedOnly;
+
+  const fetchAlerts = useCallback(async () => {
     try {
       setLoading(true);
       setError("");
-      const res = await fetch("http://localhost:5000/alerts", {
+
+      const params = new URLSearchParams();
+      if (filters.status !== "all") params.set("status", filters.status);
+      if (filters.severityLevel !== "all") params.set("severityLevel", filters.severityLevel);
+      if (filters.type !== "all") params.set("type", filters.type);
+      if (filters.source !== "all") params.set("source", filters.source);
+      if (filters.mitreTechnique.trim()) params.set("mitreTechnique", filters.mitreTechnique.trim());
+      if (filters.search.trim()) params.set("search", filters.search.trim());
+      if (filters.correlatedOnly) params.set("correlatedOnly", "true");
+
+      const query = params.toString();
+      const url = query ? `http://localhost:5000/alerts?${query}` : "http://localhost:5000/alerts";
+
+      const res = await fetch(url, {
+        headers: withSecurityHeaders(),
         signal: AbortSignal.timeout(10000) // 10 second timeout
       });
       if (!res.ok) {
         const statusText = res.status === 404 ? "Endpoint not found" :
-              res.status === 500 ? "Server error" :
-              res.status === 503 ? "Service unavailable" :
+          res.status === 500 ? "Server error" :
+            res.status === 503 ? "Service unavailable" :
               `Server returned ${res.status}`;
         throw new Error(statusText);
       }
       const data = await res.json();
       setAlerts(data);
-      if (data.length === 0) {
-        setSelectedAlert(null);
-      }
+      setSelectedAlert((prev) => {
+        if (data.length === 0) {
+          return null;
+        }
+        if (!prev) {
+          return null;
+        }
+        return data.some((a) => a._id === prev._id) ? prev : null;
+      });
     } catch (err) {
       console.error(err);
       // Better error messages
@@ -43,14 +84,15 @@ function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [filters]);
 
   async function clearAlerts() {
     try {
       setActionLoading(true);
       setError("");
       const res = await fetch("http://localhost:5000/alerts/reset", {
-        method: "DELETE"
+        method: "DELETE",
+        headers: withSecurityHeaders()
       });
       if (!res.ok) {
         throw new Error(`Failed to clear alerts (${res.status})`);
@@ -69,7 +111,9 @@ function Dashboard() {
     try {
       setActionLoading(true);
       setError("");
-      const res = await fetch(`http://localhost:5000/alerts/test?type=${type}`);
+      const res = await fetch(`http://localhost:5000/alerts/test?type=${type}`, {
+        headers: withSecurityHeaders()
+      });
       if (!res.ok) {
         throw new Error(`Failed to create test alert (${res.status})`);
       }
@@ -84,7 +128,9 @@ function Dashboard() {
 
   useEffect(() => {
     fetchAlerts();
+  }, [fetchAlerts]);
 
+  useEffect(() => {
     const socket = io("http://localhost:5000", {
       reconnection: true,
       reconnectionDelay: 1000,
@@ -100,19 +146,18 @@ function Dashboard() {
     socket.on("disconnect", () => {
       setSocketConnected(false);
 
-        socket.on("reconnect_attempt", (attemptNumber) => {
-          console.log(`Attempting to reconnect (${attemptNumber})...`);
-        });
+      socket.on("reconnect_attempt", (attemptNumber) => {
+        console.log(`Attempting to reconnect (${attemptNumber})...`);
+      });
 
-        socket.on("reconnect_failed", () => {
-          setError("Failed to reconnect to server after multiple attempts");
-        });
+      socket.on("reconnect_failed", () => {
+        setError("Failed to reconnect to server after multiple attempts");
+      });
     });
 
     socket.on("new-alert", (alert) => {
       try {
-        setAlerts((prev) => [alert, ...prev]);
-        // Auto-select first alert if none selected
+        fetchAlerts();
         if (!selectedAlert) {
           setSelectedAlert(alert);
         }
@@ -127,16 +172,23 @@ function Dashboard() {
     });
 
     return () => socket.close();
-  }, [selectedAlert]);
+  }, [fetchAlerts, selectedAlert]);
 
   // Helper function to determine alert severity
-  const getAlertSeverity = (type) => {
+  const getAlertSeverity = (alert) => {
+    if (alert?.severityLevel) {
+      return alert.severityLevel;
+    }
+
+    const type = alert?.type;
     const highSeverity = ['DEAUTHFLOOD', 'DISCONFLOOD', 'BSSTIMESTAMP'];
     const mediumSeverity = ['BEACONFLOOD', 'NULLPROBERESP'];
     if (highSeverity.includes(type)) return 'high';
     if (mediumSeverity.includes(type)) return 'medium';
     return 'low';
   };
+
+  const alertTypes = Array.from(new Set(alerts.map((a) => a.type))).sort();
 
   return (
     <div style={styles.page}>
@@ -165,16 +217,16 @@ function Dashboard() {
 
       <div style={styles.toolbar}>
         <div style={styles.toolbarLeft}>
-          <button 
-            style={styles.toolbarButton} 
+          <button
+            style={styles.toolbarButton}
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
             title={sidebarCollapsed ? "Show alerts" : "Hide alerts"}
           >
             {sidebarCollapsed ? "☰ Show Alerts" : "‹ Hide"}
           </button>
-          <button 
-            style={styles.toolbarButton} 
-            onClick={fetchAlerts} 
+          <button
+            style={styles.toolbarButton}
+            onClick={fetchAlerts}
             disabled={loading || actionLoading}
           >
             ⟳ Refresh
@@ -182,32 +234,121 @@ function Dashboard() {
         </div>
         <div style={styles.toolbarCenter}>
           <span style={styles.alertCount}>
-            {alerts.length} {alerts.length === 1 ? 'Alert' : 'Alerts'} Detected
+            {alerts.length} {alerts.length === 1 ? 'Alert' : 'Alerts'} {hasActiveFilters ? 'Matched' : 'Detected'}
           </span>
         </div>
         <div style={styles.toolbarRight}>
-          <button 
-            style={styles.simulateButton} 
-            onClick={() => createTestAlert("SSIDCONFLICT")} 
+          <button
+            style={styles.simulateButton}
+            onClick={() => createTestAlert("SSIDCONFLICT")}
             disabled={actionLoading}
           >
             + SSID Attack
           </button>
-          <button 
-            style={styles.simulateButton} 
-            onClick={() => createTestAlert("BEACONFLOOD")} 
+          <button
+            style={styles.simulateButton}
+            onClick={() => createTestAlert("BEACONFLOOD")}
             disabled={actionLoading}
           >
             + Beacon Flood
           </button>
-          <button 
-            style={styles.clearButton} 
-            onClick={clearAlerts} 
+          <button
+            style={styles.clearButton}
+            onClick={clearAlerts}
             disabled={actionLoading}
           >
             🗑 Clear All
           </button>
         </div>
+      </div>
+
+      <div style={styles.filterBar}>
+        <div style={styles.filterGroup}>
+          <span style={styles.filterLabel}>Status</span>
+          <select
+            value={filters.status}
+            onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value }))}
+            style={styles.filterSelect}
+          >
+            <option value="all">All</option>
+            <option value="new">New</option>
+            <option value="triaged">Triaged</option>
+            <option value="investigating">Investigating</option>
+            <option value="resolved">Resolved</option>
+            <option value="false_positive">False Positive</option>
+          </select>
+        </div>
+
+        <div style={styles.filterGroup}>
+          <span style={styles.filterLabel}>Severity</span>
+          <select
+            value={filters.severityLevel}
+            onChange={(e) => setFilters((prev) => ({ ...prev, severityLevel: e.target.value }))}
+            style={styles.filterSelect}
+          >
+            <option value="all">All</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="critical">Critical</option>
+          </select>
+        </div>
+
+        <div style={styles.filterGroup}>
+          <span style={styles.filterLabel}>Type</span>
+          <select
+            value={filters.type}
+            onChange={(e) => setFilters((prev) => ({ ...prev, type: e.target.value }))}
+            style={styles.filterSelect}
+          >
+            <option value="all">All</option>
+            {alertTypes.map((type) => (
+              <option key={type} value={type}>{type}</option>
+            ))}
+          </select>
+        </div>
+
+        <div style={styles.filterGroup}>
+          <span style={styles.filterLabel}>Source</span>
+          <select
+            value={filters.source}
+            onChange={(e) => setFilters((prev) => ({ ...prev, source: e.target.value }))}
+            style={styles.filterSelect}
+          >
+            <option value="all">All</option>
+            <option value="kismet">Kismet</option>
+            <option value="simulated">Simulated</option>
+            <option value="manual">Manual</option>
+          </select>
+        </div>
+
+        <div style={styles.filterGroupWide}>
+          <span style={styles.filterLabel}>Search</span>
+          <input
+            type="text"
+            value={filters.search}
+            onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
+            placeholder="Type, MAC, BSSID, MITRE..."
+            style={styles.filterInput}
+          />
+        </div>
+
+        <label style={styles.filterToggle}>
+          <input
+            type="checkbox"
+            checked={filters.correlatedOnly}
+            onChange={(e) => setFilters((prev) => ({ ...prev, correlatedOnly: e.target.checked }))}
+          />
+          Correlated only
+        </label>
+
+        <button
+          style={styles.filterClearButton}
+          onClick={() => setFilters(DEFAULT_FILTERS)}
+          disabled={!hasActiveFilters}
+        >
+          Clear Filters
+        </button>
       </div>
 
       {error && (
@@ -227,7 +368,7 @@ function Dashboard() {
               <h2 style={styles.sidebarTitle}>Threat Alerts</h2>
               <span style={styles.alertBadge}>{alerts.length}</span>
             </div>
-            
+
             <div style={styles.alertList}>
               {loading ? (
                 <div style={styles.emptyState}>
@@ -242,18 +383,18 @@ function Dashboard() {
                 </div>
               ) : (
                 alerts.map((alert) => {
-                  const severity = getAlertSeverity(alert.type);
+                  const severity = getAlertSeverity(alert);
                   const isSelected = selectedAlert?._id === alert._id;
-                  
+
                   return (
                     <button
                       key={alert._id}
                       style={{
                         ...styles.alertCard,
                         ...(isSelected && styles.alertCardSelected),
-                        borderLeftColor: 
+                        borderLeftColor:
                           severity === 'high' ? '#ef4444' :
-                          severity === 'medium' ? '#f59e0b' : '#3b82f6'
+                            severity === 'medium' ? '#f59e0b' : '#3b82f6'
                       }}
                       onClick={() => setSelectedAlert(alert)}
                       type="button"
@@ -261,12 +402,12 @@ function Dashboard() {
                       <div style={styles.alertCardHeader}>
                         <span style={{
                           ...styles.severityBadge,
-                          backgroundColor: 
+                          backgroundColor:
                             severity === 'high' ? '#7f1d1d' :
-                            severity === 'medium' ? '#78350f' : '#1e3a8a',
+                              severity === 'medium' ? '#78350f' : '#1e3a8a',
                           color:
                             severity === 'high' ? '#fca5a5' :
-                            severity === 'medium' ? '#fcd34d' : '#93c5fd'
+                              severity === 'medium' ? '#fcd34d' : '#93c5fd'
                         }}>
                           {severity === 'high' ? '🔴' : severity === 'medium' ? '🟠' : '🔵'}
                           {' ' + severity.toUpperCase()}
@@ -278,9 +419,14 @@ function Dashboard() {
                           })}
                         </span>
                       </div>
-                      
-                      <div style={styles.alertType}>{alert.type}</div>
-                      
+
+                      <div style={styles.alertType}>
+                        {alert.type}
+                        {alert.correlationCount > 1 ? (
+                          <span style={styles.alertTypeCorrelation}> 🔗 {alert.correlationCount}</span>
+                        ) : null}
+                      </div>
+
                       <div style={styles.alertMeta}>
                         <div style={styles.metaItem}>
                           <span style={styles.metaLabel}>Signal:</span>
@@ -408,6 +554,69 @@ const styles = {
     alignItems: "center",
     gap: "16px",
     flexWrap: "wrap"
+  },
+  filterBar: {
+    background: "#0f172a",
+    borderBottom: "1px solid #334155",
+    padding: "10px 32px",
+    display: "flex",
+    alignItems: "end",
+    gap: "10px",
+    flexWrap: "wrap"
+  },
+  filterGroup: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px",
+    minWidth: "120px"
+  },
+  filterGroupWide: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px",
+    minWidth: "230px"
+  },
+  filterLabel: {
+    fontSize: "11px",
+    fontWeight: "700",
+    color: "#94a3b8",
+    textTransform: "uppercase",
+    letterSpacing: "0.5px"
+  },
+  filterSelect: {
+    background: "#1e293b",
+    border: "1px solid #334155",
+    color: "#e2e8f0",
+    borderRadius: "6px",
+    padding: "7px 10px",
+    fontSize: "12px"
+  },
+  filterInput: {
+    background: "#1e293b",
+    border: "1px solid #334155",
+    color: "#e2e8f0",
+    borderRadius: "6px",
+    padding: "7px 10px",
+    fontSize: "12px"
+  },
+  filterToggle: {
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+    color: "#cbd5e1",
+    fontSize: "12px",
+    fontWeight: "600",
+    paddingBottom: "6px"
+  },
+  filterClearButton: {
+    background: "#334155",
+    border: "1px solid #475569",
+    color: "#e2e8f0",
+    padding: "8px 12px",
+    borderRadius: "6px",
+    cursor: "pointer",
+    fontSize: "12px",
+    fontWeight: "600"
   },
   toolbarLeft: {
     display: "flex",
@@ -593,6 +802,11 @@ const styles = {
     color: "#f1f5f9",
     marginBottom: "12px",
     letterSpacing: "-0.3px"
+  },
+  alertTypeCorrelation: {
+    fontSize: "12px",
+    fontWeight: "700",
+    color: "#93c5fd"
   },
   alertMeta: {
     display: "flex",

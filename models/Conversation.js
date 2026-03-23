@@ -11,6 +11,38 @@ const ConversationMessageSchema = new mongoose.Schema({
     required: true,
     trim: true
   },
+  claims: {
+    type: [String],
+    default: []
+  },
+  unknowns: {
+    type: [String],
+    default: []
+  },
+  evidence: {
+    type: [String],
+    default: []
+  },
+  confidenceScore: {
+    type: Number,
+    min: 0,
+    max: 1,
+    default: null
+  },
+  confidenceLabel: {
+    type: String,
+    enum: ["high", "medium", "low", null],
+    default: null
+  },
+  verificationStatus: {
+    type: String,
+    enum: ["verified", "partially_verified", "unverified", null],
+    default: null
+  },
+  needsAnalystValidation: {
+    type: Boolean,
+    default: false
+  },
   timestamp: {
     type: Date,
     default: Date.now

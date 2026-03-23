@@ -11,6 +11,8 @@ import aiRoute from "./routes/ai.js";
 import { connectDB } from "./config/db.js";
 import alertsRoute from "./routes/alerts.js";
 import { startKismetListener } from "./services/kismetListener.js";
+import healthRoute from "./routes/health.js";
+import { requestLogger, errorLogger } from "./middleware/logging.js";
 
 const app = express();
 const server = http.createServer(app);
@@ -24,49 +26,70 @@ connectDB();
 app.use(cors());
 app.use(express.json());
 
+// Request logging (structured JSON)
+app.use(requestLogger);
+
+// Health and readiness probes (should be early in middleware stack)
+app.use("/", healthRoute);
+
 app.use("/alerts", alertsRoute);
 app.use("/ai", aiRoute);
+
+// Error logger - before global error handler
+app.use(errorLogger);
 
 // 404 Handler - must come after all routes
 app.use((req, res) => {
   res.status(404).json({
+    status: 'error',
     error: "Not Found",
     message: `Cannot ${req.method} ${req.path}`,
-    availableRoutes: ["/alerts", "/ai/chat"]
+    timestamp: new Date().toISOString(),
+    availableRoutes: ["/alerts", "/ai/chat", "/health", "/ready"]
   });
 });
 
-// Global Error Handler - must be last
+// Global Error Handler - must be last (standardized error envelope)
 app.use((err, req, res, next) => {
   console.error("Global error handler:", err);
 
+  let statusCode = 500;
+  let errorType = "InternalServerError";
+  let message = "An unexpected error occurred";
+  let details = undefined;
+
   // Handle specific error types
   if (err.name === "ValidationError") {
-    return res.status(400).json({
-      error: "Validation Error",
-      details: err.message
-    });
+    statusCode = 400;
+    errorType = "ValidationError";
+    message = err.message;
+    details = Object.keys(err.errors || {}).map(key => ({
+      field: key,
+      issue: err.errors[key].message
+    }));
+  } else if (err.name === "CastError") {
+    statusCode = 400;
+    errorType = "InvalidID";
+    message = "The provided ID is not a valid MongoDB ObjectId";
+  } else if (err.code === "GROQ_API_KEY_MISSING") {
+    statusCode = 500;
+    errorType = "ConfigurationError";
+    message = "AI service is not configured properly";
+  } else if (err.statusCode || err.status) {
+    statusCode = err.statusCode || err.status;
+    message = err.message || message;
+  } else if (err.message) {
+    message = err.message;
   }
 
-  if (err.name === "CastError") {
-    return res.status(400).json({
-      error: "Invalid ID format",
-      details: "The provided ID is not a valid MongoDB ObjectId"
-    });
-  }
-
-  if (err.code === "GROQ_API_KEY_MISSING") {
-    return res.status(500).json({
-      error: "Configuration Error",
-      message: "AI service is not configured properly"
-    });
-  }
-
-  // Generic error response
-  const statusCode = err.statusCode || err.status || 500;
+  // Standardized error response envelope
   res.status(statusCode).json({
-    error: err.message || "Internal Server Error",
-    details: process.env.NODE_ENV === "development" ? err.stack : undefined
+    status: 'error',
+    error: errorType,
+    message: message,
+    ...(details && { details }),
+    timestamp: new Date().toISOString(),
+    ...(process.env.NODE_ENV === "development" && { stack: err.stack })
   });
 });
 
@@ -80,6 +103,16 @@ if (shouldEnableKismet) {
   console.log("Kismet listener disabled (set ENABLE_KISMET=true to enable)");
 }
 
+// Track active connections for graceful shutdown
+let activeConnections = 0;
+
+server.on("connection", (conn) => {
+  activeConnections++;
+  conn.on("close", () => {
+    activeConnections--;
+  });
+});
+
 server.on("error", (err) => {
   if (err.code === "EADDRINUSE") {
     console.error(`Port ${port} is already in use. Stop the existing process or set PORT to a different value in .env.`);
@@ -90,7 +123,14 @@ server.on("error", (err) => {
 });
 
 server.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+  const startupLog = {
+    timestamp: new Date().toISOString(),
+    event: 'SERVER_STARTED',
+    port: port,
+    nodeEnv: process.env.NODE_ENV || 'development',
+    uptime: process.uptime()
+  };
+  console.log(JSON.stringify(startupLog));
 });
 
 // Process-level error handlers
@@ -118,18 +158,42 @@ process.on("uncaughtException", (err) => {
   }, 5000);
 });
 
-// Graceful shutdown on SIGTERM/SIGINT
+// Graceful shutdown on SIGTERM/SIGINT with connection tracking
 const gracefulShutdown = (signal) => {
-  console.log(`Received ${signal}. Starting graceful shutdown...`);
+  const shutdownLog = {
+    timestamp: new Date().toISOString(),
+    event: 'SHUTDOWN_INITIATED',
+    signal: signal,
+    activeConnections: activeConnections
+  };
+  console.log(JSON.stringify(shutdownLog));
+
+  // Stop accepting new connections
   server.close(() => {
-    console.log("Server closed");
+    const completedLog = {
+      timestamp: new Date().toISOString(),
+      event: 'SHUTDOWN_COMPLETED',
+      signal: signal
+    };
+    console.log(JSON.stringify(completedLog));
     process.exit(0);
   });
-  // Force exit after 10 seconds
-  setTimeout(() => {
-    console.error("Forced shutdown after timeout");
+
+  // Force exit after 30 seconds if graceful shutdown doesn't complete
+  const shutdownTimeout = setTimeout(() => {
+    const forcedLog = {
+      timestamp: new Date().toISOString(),
+      event: 'FORCED_SHUTDOWN',
+      signal: signal,
+      activeConnections: activeConnections,
+      reason: 'graceful shutdown timeout exceeded'
+    };
+    console.error(JSON.stringify(forcedLog));
     process.exit(1);
-  }, 10000);
+  }, 30000);
+
+  // Clear timeout if shutdown completes
+  server.once('close', () => clearTimeout(shutdownTimeout));
 };
 
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));

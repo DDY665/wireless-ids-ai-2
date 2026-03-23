@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
+import { withSecurityHeaders } from "../src/apiSecurity";
 
 function ChatInterface({ alertId = null, alertContext = null }) {
   const [messages, setMessages] = useState([]);
@@ -41,6 +42,7 @@ function ChatInterface({ alertId = null, alertContext = null }) {
 
       try {
         const res = await fetch(`http://localhost:5000/ai/chat-history/${alertId}`, {
+          headers: withSecurityHeaders(),
           signal: AbortSignal.timeout(10000)
         });
 
@@ -51,12 +53,19 @@ function ChatInterface({ alertId = null, alertContext = null }) {
         const data = await res.json();
         const historyMessages = Array.isArray(data.messages)
           ? data.messages
-              .filter((msg) => msg?.role === "user" || msg?.role === "assistant")
-              .map((msg) => ({
-                role: msg.role,
-                content: msg.content,
-                timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date()
-              }))
+            .filter((msg) => msg?.role === "user" || msg?.role === "assistant")
+            .map((msg) => ({
+              role: msg.role,
+              content: msg.content,
+              timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date(),
+              claims: Array.isArray(msg.claims) ? msg.claims : [],
+              unknowns: Array.isArray(msg.unknowns) ? msg.unknowns : [],
+              evidence: Array.isArray(msg.evidence) ? msg.evidence : [],
+              confidenceScore: typeof msg.confidenceScore === "number" ? msg.confidenceScore : null,
+              confidenceLabel: msg.confidenceLabel || null,
+              verificationStatus: msg.verificationStatus || null,
+              needsAnalystValidation: Boolean(msg.needsAnalystValidation)
+            }))
           : [];
 
         if (!cancelled) {
@@ -99,9 +108,9 @@ function ChatInterface({ alertId = null, alertContext = null }) {
 
       const res = await fetch("http://localhost:5000/ai/chat", {
         method: "POST",
-        headers: {
+        headers: withSecurityHeaders({
           "Content-Type": "application/json"
-        },
+        }),
         body: JSON.stringify({
           message: input,
           history,
@@ -118,7 +127,14 @@ function ChatInterface({ alertId = null, alertContext = null }) {
       const aiMsg = {
         role: "assistant",
         content: data.reply,
-        timestamp: new Date()
+        timestamp: new Date(),
+        claims: Array.isArray(data.truth?.claims) ? data.truth.claims : [],
+        unknowns: Array.isArray(data.truth?.unknowns) ? data.truth.unknowns : [],
+        evidence: Array.isArray(data.truth?.evidence) ? data.truth.evidence : [],
+        confidenceScore: typeof data.truth?.confidenceScore === "number" ? data.truth.confidenceScore : null,
+        confidenceLabel: data.truth?.confidenceLabel || null,
+        verificationStatus: data.truth?.verificationStatus || null,
+        needsAnalystValidation: Boolean(data.truth?.needsAnalystValidation)
       };
 
       setMessages(prev => [...prev, aiMsg]);
@@ -147,6 +163,51 @@ function ChatInterface({ alertId = null, alertContext = null }) {
     }
   };
 
+  const clearHistory = async () => {
+    if (!alertId) return;
+    if (!window.confirm("Clear all conversation history for this alert? This cannot be undone.")) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`http://localhost:5000/ai/chat-history/${alertId}`, {
+        method: "DELETE",
+        headers: withSecurityHeaders()
+      });
+      if (!res.ok) {
+        throw new Error("Failed to clear history");
+      }
+      // Reset messages to welcome message
+      const welcomeMsg = {
+        role: "assistant",
+        content: buildWelcomeMessage(),
+        timestamp: new Date()
+      };
+      setMessages([welcomeMsg]);
+    } catch (err) {
+      console.error("Error clearing history:", err);
+      alert("Failed to clear conversation history");
+    }
+  };
+
+  const getLastMessageTime = () => {
+    if (messages.length === 0) return null;
+    const lastMsg = messages[messages.length - 1];
+    return lastMsg.timestamp ? new Date(lastMsg.timestamp) : null;
+  };
+
+  const formatTimeAgo = (date) => {
+    if (!date) return "N/A";
+    const now = new Date();
+    const seconds = Math.floor((now - date) / 1000);
+    if (seconds < 60) return "just now";
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return date.toLocaleDateString();
+  };
+
   return (
     <div style={styles.container}>
       {alertContext && (
@@ -168,6 +229,28 @@ function ChatInterface({ alertId = null, alertContext = null }) {
           </div>
         </div>
       )}
+
+      {/* Chat Header */}
+      <div style={styles.chatHeader}>
+        <div style={styles.chatHeaderLeft}>
+          <span style={styles.chatHeaderTitle}>💬 Analyst Chat</span>
+          <span style={styles.chatHeaderMeta}>
+            {messages.length > 0 ? `${messages.length} messages` : "No messages"}
+            {getLastMessageTime() && ` • Last: ${formatTimeAgo(getLastMessageTime())}`}
+          </span>
+        </div>
+        <button
+          onClick={clearHistory}
+          disabled={messages.length === 0 || loading}
+          style={{
+            ...styles.clearButton,
+            ...(messages.length === 0 || loading ? styles.clearButtonDisabled : {})
+          }}
+          title="Clear conversation history for this alert"
+        >
+          🗑 Clear
+        </button>
+      </div>
 
       <div style={styles.chatWindow}>
         {messages.map((msg, i) => (
@@ -214,6 +297,42 @@ function ChatInterface({ alertId = null, alertContext = null }) {
               ) : (
                 <div>{msg.content}</div>
               )}
+
+              {msg.role === "assistant" && msg.confidenceLabel && (
+                <div style={styles.truthMetaRow}>
+                  <span
+                    style={{
+                      ...styles.confidenceBadge,
+                      ...(msg.confidenceLabel === "high"
+                        ? styles.confidenceHigh
+                        : msg.confidenceLabel === "medium"
+                          ? styles.confidenceMedium
+                          : styles.confidenceLow)
+                    }}
+                  >
+                    Confidence: {msg.confidenceLabel.toUpperCase()}
+                    {typeof msg.confidenceScore === "number" ? ` (${Math.round(msg.confidenceScore * 100)}%)` : ""}
+                  </span>
+                  {msg.verificationStatus ? (
+                    <span style={styles.verificationText}>
+                      Verification: {msg.verificationStatus.replace("_", " ")}
+                    </span>
+                  ) : null}
+                </div>
+              )}
+
+              {msg.role === "assistant" && msg.needsAnalystValidation && (
+                <div style={styles.validationWarning}>
+                  Needs analyst validation due to low confidence.
+                </div>
+              )}
+
+              {msg.role === "assistant" && Array.isArray(msg.unknowns) && msg.unknowns.length > 0 && (
+                <div style={styles.unknownsText}>
+                  Unknowns: {msg.unknowns.join("; ")}
+                </div>
+              )}
+
               <div style={styles.timestamp}>
                 {msg.timestamp.toLocaleTimeString([], {
                   hour: "2-digit",
@@ -228,8 +347,8 @@ function ChatInterface({ alertId = null, alertContext = null }) {
           <div style={styles.messageContainer}>
             <div style={styles.loadingIndicator}>
               <div style={styles.loadingDot} />
-              <div style={{...styles.loadingDot, animationDelay: "0.2s"}} />
-              <div style={{...styles.loadingDot, animationDelay: "0.4s"}} />
+              <div style={{ ...styles.loadingDot, animationDelay: "0.2s" }} />
+              <div style={{ ...styles.loadingDot, animationDelay: "0.4s" }} />
               <span>AI is analyzing...</span>
             </div>
           </div>
@@ -323,6 +442,49 @@ const styles = {
     fontWeight: "600",
     fontFamily: "'SF Mono', 'Monaco', 'Courier New', monospace"
   },
+  chatHeader: {
+    padding: "16px 24px",
+    background: "#1e293b",
+    borderBottom: "1px solid #334155",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "16px"
+  },
+  chatHeaderLeft: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px"
+  },
+  chatHeaderTitle: {
+    color: "#f1f5f9",
+    fontSize: "13px",
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: "0.5px"
+  },
+  chatHeaderMeta: {
+    color: "#64748b",
+    fontSize: "12px",
+    fontWeight: "500"
+  },
+  clearButton: {
+    padding: "8px 14px",
+    background: "#ef4444",
+    color: "#ffffff",
+    border: "none",
+    borderRadius: "6px",
+    cursor: "pointer",
+    fontSize: "12px",
+    fontWeight: "600",
+    transition: "all 0.2s",
+    whiteSpace: "nowrap"
+  },
+  clearButtonDisabled: {
+    background: "#6b7280",
+    cursor: "not-allowed",
+    opacity: "0.5"
+  },
   chatWindow: {
     flex: 1,
     overflowY: "auto",
@@ -362,6 +524,50 @@ const styles = {
     background: "#7f1d1d",
     color: "#fecaca",
     border: "1px solid #991b1b"
+  },
+  truthMetaRow: {
+    marginTop: "10px",
+    display: "flex",
+    gap: "8px",
+    flexWrap: "wrap",
+    alignItems: "center"
+  },
+  confidenceBadge: {
+    fontSize: "11px",
+    fontWeight: "700",
+    padding: "3px 8px",
+    borderRadius: "999px",
+    border: "1px solid transparent",
+    letterSpacing: "0.3px"
+  },
+  confidenceHigh: {
+    background: "#14532d",
+    color: "#bbf7d0",
+    borderColor: "#166534"
+  },
+  confidenceMedium: {
+    background: "#713f12",
+    color: "#fde68a",
+    borderColor: "#a16207"
+  },
+  confidenceLow: {
+    background: "#7f1d1d",
+    color: "#fecaca",
+    borderColor: "#991b1b"
+  },
+  verificationText: {
+    fontSize: "11px",
+    color: "#93c5fd"
+  },
+  validationWarning: {
+    marginTop: "8px",
+    fontSize: "12px",
+    color: "#fca5a5"
+  },
+  unknownsText: {
+    marginTop: "6px",
+    fontSize: "11px",
+    color: "#cbd5e1"
   },
   timestamp: {
     fontSize: "11px",

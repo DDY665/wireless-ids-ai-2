@@ -19,6 +19,15 @@ const AlertSchema = new mongoose.Schema({
     type: String,
     default: "Unknown"
   },
+  channel: {
+    type: Number,
+    default: null,
+    index: true
+  },
+  frequency: {
+    type: Number,
+    default: null
+  },
   signal: {
     type: Number,
     default: 0
@@ -91,6 +100,18 @@ const AlertSchema = new mongoose.Schema({
   explanation: {
     type: String,
     default: ""
+  },
+
+  // Correlation tracking
+  correlationId: {
+    type: String,
+    index: true,
+    default: null
+  },
+  correlationCount: {
+    type: Number,
+    min: 1,
+    default: 1
   }
 }, {
   timestamps: true
