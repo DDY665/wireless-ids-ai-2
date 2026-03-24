@@ -1,116 +1,81 @@
-:root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
-
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #0f172a;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-/* Professional animations for cybersecurity dashboard */
-@keyframes pulse {
-  0%, 100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.6;
-    transform: scale(1.1);
-  }
-}
-
-@keyframes slideIn {
-  from {
-    opacity: 0;
-    transform: translateX(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-/* Scrollbar styling for dark theme */
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-
-::-webkit-scrollbar-track {
-  background: #0f172a;
-}
-
-::-webkit-scrollbar-thumb {
-  background: #334155;
-  border-radius: 5px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #475569;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
-}
-
-body {
-  margin: 0;
-  min-width: 320px;
-  min-height: 100vh;
-  background: #0f172a;
-  overflow-x: hidden;
-}
-
 * {
   box-sizing: border-box;
 }
 
+:root {
+  --wi-body-bg: #f4efe4;
+  --wi-scroll-track: rgba(42, 53, 62, 0.08);
+  --wi-scroll-thumb: linear-gradient(180deg, #9eb0a0 0%, #738879 100%);
+  --wi-scroll-thumb-hover: linear-gradient(180deg, #adc0af 0%, #7f9485 100%);
+}
+
+html,
+body,
 #root {
-  min-height: 100vh;
   width: 100%;
+  min-height: 100%;
+  margin: 0;
+  padding: 0;
 }
 
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
+body {
+  min-height: 100vh;
+  font-family: 'DM Sans', 'Segoe UI', Tahoma, sans-serif;
+  color: #1a1814;
+  background: var(--wi-body-bg);
+  transition: background-color 0.22s ease;
 }
 
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  cursor: pointer;
-  transition: all 0.2s ease;
+body.wi-theme-light {
+  --wi-body-bg: #f4efe4;
+  --wi-scroll-track: rgba(42, 53, 62, 0.08);
+  --wi-scroll-thumb: linear-gradient(180deg, #9eb0a0 0%, #738879 100%);
+  --wi-scroll-thumb-hover: linear-gradient(180deg, #adc0af 0%, #7f9485 100%);
+}
+
+body.wi-theme-dark {
+  --wi-body-bg: #0f171b;
+  --wi-scroll-track: rgba(205, 225, 235, 0.08);
+  --wi-scroll-thumb: linear-gradient(180deg, #4d6978 0%, #2f4553 100%);
+  --wi-scroll-thumb-hover: linear-gradient(180deg, #5b7888 0%, #385060 100%);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
 }
 
 button:disabled {
-  cursor: not-allowed;
   opacity: 0.6;
+  cursor: not-allowed;
 }
 
-button:focus-visible {
-  outline: 2px solid #60a5fa;
+:focus-visible {
+  outline: 2px solid #2a7d5d;
   outline-offset: 2px;
 }
 
-textarea:focus {
-  outline: none;
-  border-color: #60a5fa !important;
-  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.2);
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
 }
 
-/* Dark theme is enforced - no light mode */
+::-webkit-scrollbar-track {
+  background: var(--wi-scroll-track);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--wi-scroll-thumb);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--wi-scroll-thumb-hover);
+  background-clip: content-box;
+}
+

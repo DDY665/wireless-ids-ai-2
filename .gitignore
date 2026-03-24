@@ -1,2 +1,23 @@
 .env
 node_modules
+
+# Frontend dependencies/build
+client/node_modules/
+client/dist/
+
+# Logs and OS/editor noise
+*.log
+.DS_Store
+Thumbs.db
+
+# MongoDB runtime artifacts
+data/db/
+data/db/**
+data/db/_tmp/
+data/db/diagnostic.data/
+data/db/journal/
+data/db/*.wt
+data/db/*.lock
+data/db/WiredTiger*
+data/db/mongod.lock
+data/db/storage.bson
