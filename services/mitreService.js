@@ -1,9 +1,6 @@
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const fs = require("fs");
+const path = require("path");
 
 const mitrePath = path.join(__dirname, "../mitre/enterprise-attack.json");
 
@@ -31,7 +28,7 @@ const map = {
   NULLPROBERESP: "T1040"     // Network Sniffing
 };
 
-export function mapToMitre(alertType) {
+function mapToMitre(alertType) {
   try {
     if (!alertType) {
       console.warn("⚠️  No alert type provided for MITRE mapping");
@@ -93,6 +90,8 @@ export function mapToMitre(alertType) {
 }
 
 // Get all available mappings
-export function getAvailableMappings() {
+function getAvailableMappings() {
   return Object.keys(map);
 }
+
+module.exports = { mapToMitre, getAvailableMappings };

@@ -14,7 +14,7 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-export function scoreAlertSeverity({ type, signal, occurrenceCount = 1 }) {
+function scoreAlertSeverity({ type, signal, occurrenceCount = 1 }) {
   const normalizedType = String(type || "").toUpperCase();
   let score = ATTACK_BASE_SCORE[normalizedType] || 40;
 
@@ -44,3 +44,5 @@ export function scoreAlertSeverity({ type, signal, occurrenceCount = 1 }) {
 
   return { severityScore: score, severityLevel: "low" };
 }
+
+module.exports = { scoreAlertSeverity };

@@ -1,18 +1,21 @@
-import dotenv from "dotenv";
+
+const dotenv = require("dotenv");
 dotenv.config();
 
 
-import express from "express";
-import http from "http";
-import cors from "cors";
-import { Server } from "socket.io";
-import aiRoute from "./routes/ai.js";
 
-import { connectDB } from "./config/db.js";
-import alertsRoute from "./routes/alerts.js";
-import { startKismetListener } from "./services/kismetListener.js";
-import healthRoute from "./routes/health.js";
-import { requestLogger, errorLogger } from "./middleware/logging.js";
+const express = require("express");
+const http = require("http");
+const cors = require("cors");
+const { Server } = require("socket.io");
+const aiRoute = require("./routes/ai.js");
+
+
+const { connectDB } = require("./config/db.js");
+const alertsRoute = require("./routes/alerts.js");
+const { startKismetListener } = require("./services/kismetListener.js");
+const healthRoute = require("./routes/health.js");
+const { requestLogger, errorLogger } = require("./middleware/logging.js");
 
 const app = express();
 const server = http.createServer(app);

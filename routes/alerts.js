@@ -1,9 +1,10 @@
-import express from "express";
-import Alert from "../models/Alert.js";
-import mongoose from "mongoose";
-import { mapToMitre, getAvailableMappings } from "../services/mitreService.js";
-import { scoreAlertSeverity } from "../services/severityService.js";
-import { requireApiKey } from "../middleware/auth.js";
+
+const express = require("express");
+const Alert = require("../models/Alert.js");
+const mongoose = require("mongoose");
+const { mapToMitre, getAvailableMappings } = require("../services/mitreService.js");
+const { scoreAlertSeverity } = require("../services/severityService.js");
+const { requireApiKey } = require("../middleware/auth.js");
 
 const router = express.Router();
 
@@ -15,7 +16,7 @@ function isValidObjectId(id) {
   return mongoose.Types.ObjectId.isValid(id);
 }
 
-export function buildAlertsQuery(rawQuery = {}) {
+function buildAlertsQuery(rawQuery = {}) {
   const query = {};
 
   if (rawQuery.status && rawQuery.status !== "all") {
@@ -365,4 +366,4 @@ router.patch("/:id/status", requireApiKey, async (req, res) => {
 });
 
 
-export default router;
+module.exports = router;

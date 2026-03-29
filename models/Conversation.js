@@ -1,4 +1,4 @@
-import mongoose from "mongoose";
+const mongoose = require("mongoose");
 
 const ConversationMessageSchema = new mongoose.Schema({
   role: {
@@ -55,4 +55,4 @@ const ConversationSchema = new mongoose.Schema({
 
 ConversationSchema.index({ alertId: 1, lastMessageAt: -1 });
 
-export default mongoose.model("Conversation", ConversationSchema);
+module.exports = mongoose.model("Conversation", ConversationSchema);

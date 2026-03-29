@@ -1,5 +1,6 @@
-import mongoose from 'mongoose';
-import express from 'express';
+
+const mongoose = require('mongoose');
+const express = require('express');
 
 const router = express.Router();
 
@@ -34,4 +35,4 @@ router.get('/ready', (req, res) => {
   });
 });
 
-export default router;
+module.exports = router;

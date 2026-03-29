@@ -10,11 +10,11 @@ function getExpectedApiKey() {
   return process.env.SECURITY_API_KEY || process.env.API_KEY || "";
 }
 
-export function isApiKeyEnforced() {
+function isApiKeyEnforced() {
   return normalizeEnvBoolean(process.env.SECURITY_ENFORCE_API_KEY, false);
 }
 
-export function getApiKeyFromRequest(req) {
+function getApiKeyFromRequest(req) {
   const headerKey = req.get("x-api-key");
   if (headerKey) {
     return headerKey.trim();
@@ -29,7 +29,7 @@ export function getApiKeyFromRequest(req) {
   return "";
 }
 
-export function requireApiKey(req, res, next) {
+function requireApiKey(req, res, next) {
   if (!isApiKeyEnforced()) {
     return next();
   }
@@ -52,3 +52,4 @@ export function requireApiKey(req, res, next) {
 
   return next();
 }
+module.exports = { isApiKeyEnforced, getApiKeyFromRequest, requireApiKey };

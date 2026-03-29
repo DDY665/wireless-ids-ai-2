@@ -1,5 +1,5 @@
 // Request logging middleware with structured JSON output
-export const requestLogger = (req, res, next) => {
+function requestLogger(req, res, next) {
   const startTime = Date.now();
 
   // Capture response end
@@ -28,7 +28,7 @@ export const requestLogger = (req, res, next) => {
 };
 
 // Error logging middleware
-export const errorLogger = (err, req, res, next) => {
+function errorLogger(err, req, res, next) {
   const errorEntry = {
     timestamp: new Date().toISOString(),
     type: 'ERROR',
@@ -43,3 +43,5 @@ export const errorLogger = (err, req, res, next) => {
   console.error(JSON.stringify(errorEntry));
   next(err);
 };
+
+module.exports = { requestLogger, errorLogger };

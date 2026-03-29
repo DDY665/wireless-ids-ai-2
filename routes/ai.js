@@ -1,9 +1,10 @@
-import express from "express";
-import Alert from "../models/Alert.js";
-import Conversation from "../models/Conversation.js";
-import Groq from "groq-sdk";
-import mongoose from "mongoose";
-import { requireApiKey } from "../middleware/auth.js";
+
+const express = require("express");
+const Alert = require("../models/Alert.js");
+const Conversation = require("../models/Conversation.js");
+const Groq = require("groq-sdk");
+const mongoose = require("mongoose");
+const { requireApiKey } = require("../middleware/auth.js");
 
 const router = express.Router();
 
@@ -336,8 +337,19 @@ router.post("/chat", requireApiKey, async (req, res) => {
 
 Current Alert Context:
 - Attack Type: ${alertContext.type}
+    - Severity Level: ${alertContext.severityLevel || "unknown"}
+    - Severity Score: ${alertContext.severityScore ?? "unknown"}
 - Signal Strength: ${alertContext.signal} dBm
+    - Source MAC: ${alertContext.source_mac || "unknown"}
+    - Destination MAC: ${alertContext.dest_mac || "unknown"}
+    - BSSID: ${alertContext.bssid || "unknown"}
+    - Channel: ${alertContext.channel ?? "unknown"}
+    - Frequency: ${alertContext.frequency ?? "unknown"}
+    - Source System: ${alertContext.source || "unknown"}
+    - Occurrence Count: ${alertContext.occurrenceCount ?? 1}
+    - Correlation Count: ${alertContext.correlationCount ?? 1}
 - MITRE Technique: ${alertContext.mitre?.technique_id} - ${alertContext.mitre?.name}
+    - MITRE Tactic: ${alertContext.mitre?.tactic || 'N/A'}
 - Description: ${alertContext.mitre?.description || 'N/A'}
 - Timestamp: ${alertContext.timestamp}
 `;
@@ -695,4 +707,4 @@ Description: ${alert.mitre?.description}`;
 });
 
 
-export default router;
+module.exports = router;

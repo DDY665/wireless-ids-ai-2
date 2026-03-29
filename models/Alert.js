@@ -1,4 +1,4 @@
-import mongoose from "mongoose";
+const mongoose = require("mongoose");
 
 const AlertSchema = new mongoose.Schema({
   type: {
@@ -121,4 +121,4 @@ AlertSchema.index({ type: 1, timestamp: -1 });
 AlertSchema.index({ severityLevel: 1, timestamp: -1 });
 AlertSchema.index({ "mitre.technique_id": 1 });
 
-export default mongoose.model("Alert", AlertSchema);
+module.exports = mongoose.model("Alert", AlertSchema);

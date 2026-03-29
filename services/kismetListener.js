@@ -1,190 +1,73 @@
-import WebSocket from "ws";
-import Alert from "../models/Alert.js";
-import { mapToMitre } from "./mitreService.js";
-import { scoreAlertSeverity } from "./severityService.js";
 
-let reconnectTimeout;
-let ws;
+const axios = require("axios");
+const Alert = require("../models/Alert.js");
+const { mapToMitre } = require("./mitreService.js");
+const { scoreAlertSeverity } = require("./severityService.js");
 
-const DEFAULT_SINGLE_DONGLE_ALERTS = [
-  "DEAUTHFLOOD",
-  "DISASSOCFLOOD",
-  "BEACONFLOOD",
-  "PROBERESP",
-  "SSIDCONFLICT",
-  "MACCONFLICT",
-  "NULLPROBERESP"
-];
 
-function parseBoolean(value) {
-  return String(value).toLowerCase() === "true";
-}
+let pollInterval = Number(process.env.KISMET_POLL_INTERVAL) || 5; // seconds
+let pollTimer = null;
+const seenAlertIds = new Set();
 
-function parseNumber(value, fallback) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function parseCsvSet(value) {
-  const items = String(value || "")
-    .split(",")
-    .map((part) => part.trim().toUpperCase())
-    .filter(Boolean);
-  return items.length ? new Set(items) : null;
-}
-
-function extractNumber(...candidates) {
-  for (const candidate of candidates) {
-    const parsed = Number(candidate);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-  return null;
-}
-
-function extractChannel(data) {
-  return extractNumber(
-    data.channel,
-    data.chan,
-    data.dot11_channel,
-    data?.kismet?.channel
-  );
-}
-
-function extractFrequency(data) {
-  return extractNumber(
-    data.frequency,
-    data.freq,
-    data.channel_frequency,
-    data?.kismet?.frequency
-  );
-}
-
-function buildRuntimeConfig() {
-  const singleDongleMode = parseBoolean(process.env.SINGLE_DONGLE_MODE);
-  const minSignalDbm = parseNumber(process.env.MIN_SIGNAL_DBM, singleDongleMode ? -85 : -100);
-  const dedupeWindowSeconds = parseNumber(process.env.DEDUPE_WINDOW_SECONDS, 8);
-  const configuredAllowedAlerts = parseCsvSet(process.env.KISMET_ALLOWED_ALERTS);
-  const allowedAlerts = configuredAllowedAlerts || (singleDongleMode ? new Set(DEFAULT_SINGLE_DONGLE_ALERTS) : null);
-
+function getKismetConfig() {
   return {
-    singleDongleMode,
-    minSignalDbm,
-    dedupeWindowSeconds,
-    allowedAlerts
+    host: process.env.KISMET_HOST || "localhost",
+    port: process.env.KISMET_PORT || 2501,
+    apiKey: process.env.KISMET_API_KEY || "",
+    endpoint: process.env.KISMET_ALERTS_ENDPOINT || "/alerts/all_alerts.json"
   };
 }
 
-export function startKismetListener(io) {
-  connectToKismet(io);
+function getAlertId(alert) {
+  return (
+    alert["kismet.alert.hash"] ||
+    alert["kismet.alert.uuid"] ||
+    alert["kismet.alert.timestamp"] ||
+    null
+  );
 }
 
-function connectToKismet(io, retryCount = 0) {
-  const maxRetries = 10;
-  const retryDelay = Math.min(5000 * Math.pow(1.5, retryCount), 60000); // Max 60s
-
+async function fetchKismetAlerts() {
+  const { host, port, apiKey, endpoint } = getKismetConfig();
+  const url = `http://${host}:${port}${endpoint}`;
   try {
-    ws = new WebSocket("ws://localhost:2501/alerts/alerts.ws");
-
-    ws.on("open", () => {
-      console.log("✅ Connected to Kismet Alerts API");
-      retryCount = 0; // Reset retry count on successful connection
+    const response = await axios.get(url, {
+      headers: apiKey ? { "KISMET-API-KEY": apiKey } : {},
+      timeout: 5000
     });
+    if (Array.isArray(response.data)) {
+      return response.data;
+    }
+    return [];
+  } catch (err) {
+    console.error("[Kismet REST] Error fetching alerts:", err.message);
+    return [];
+  }
+}
 
-    ws.on("error", (err) => {
-      if (err.code === 'ECONNREFUSED') {
-        console.log("⚠️  Kismet not running yet. Will retry...");
-      } else {
-        console.error("❌ Kismet WebSocket error:", err.message);
-      }
-    });
+function startKismetListener(io) {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+  }
+  pollTimer = setInterval(async () => {
+    const alerts = await fetchKismetAlerts();
+    for (const alert of alerts) {
+      const alertId = getAlertId(alert);
+      if (!alertId || seenAlertIds.has(alertId)) continue;
+      seenAlertIds.add(alertId);
 
-    ws.on("close", () => {
-      console.log("🔌 Kismet connection closed. Reconnecting...");
+      // Parse alert fields
+      const alertType = alert["kismet.alert.class"] || "UNKNOWN";
+      const sourceMac = alert["kismet.alert.transmitter_mac"] || "Unknown";
+      const destMac = alert["kismet.alert.dest_mac"] || "Unknown";
+      const channel = alert["kismet.alert.channel"] || null;
+      const frequency = alert["kismet.alert.frequency"] || null;
+      const signal = alert["kismet.alert.signal_dbm"] || 0;
+      const timestamp = alert["kismet.alert.timestamp"] || Date.now();
+      const text = alert["kismet.alert.text"] || "No description";
 
-      // Clear existing timeout
-      if (reconnectTimeout) {
-        clearTimeout(reconnectTimeout);
-      }
-
-      // Attempt reconnection with exponential backoff
-      if (retryCount < maxRetries) {
-        reconnectTimeout = setTimeout(() => {
-          console.log(`🔄 Reconnection attempt ${retryCount + 1}/${maxRetries}...`);
-          connectToKismet(io, retryCount + 1);
-        }, retryDelay);
-      } else {
-        console.error("❌ Max Kismet reconnection attempts reached. Manual restart required.");
-      }
-    });
-
-    ws.on("message", async (msg) => {
+      // Store in DB and emit to clients
       try {
-        const runtime = buildRuntimeConfig();
-        const data = JSON.parse(msg.toString());
-
-        // Validate incoming data
-        if (!data.alert) {
-          console.warn("⚠️  Received alert without type:", data);
-          return;
-        }
-
-        const alertType = String(data.alert).trim().toUpperCase();
-
-        // Single-dongle mode can restrict noisy/low-value event types.
-        if (runtime.allowedAlerts && !runtime.allowedAlerts.has(alertType)) {
-          return;
-        }
-
-        const signal = Number.isFinite(Number(data.signal)) ? Number(data.signal) : 0;
-        if (runtime.singleDongleMode && signal < runtime.minSignalDbm) {
-          return;
-        }
-
-        const channel = extractChannel(data);
-        const frequency = extractFrequency(data);
-        const sourceMac = data.source_mac || "Unknown";
-        const destMac = data.dest_mac || "Unknown";
-        const bssid = data.bssid || "Unknown";
-        const now = new Date();
-
-        // Deduplicate bursty alerts from one adapter/channel-hopping setups.
-        const dedupeStart = new Date(now.getTime() - runtime.dedupeWindowSeconds * 1000);
-        const existing = await Alert.findOne({
-          source: "kismet",
-          type: alertType,
-          source_mac: sourceMac,
-          bssid,
-          timestamp: { $gte: dedupeStart }
-        }).sort({ timestamp: -1 });
-
-        if (existing) {
-          existing.occurrenceCount += 1;
-          existing.lastSeen = now;
-          existing.timestamp = now;
-          existing.signal = signal;
-          if (channel !== null) {
-            existing.channel = channel;
-          }
-          if (frequency !== null) {
-            existing.frequency = frequency;
-          }
-
-          const updatedSeverity = scoreAlertSeverity({
-            type: existing.type,
-            signal,
-            occurrenceCount: existing.occurrenceCount
-          });
-          existing.severityScore = updatedSeverity.severityScore;
-          existing.severityLevel = updatedSeverity.severityLevel;
-
-          await existing.save();
-          io.emit("new-alert", existing);
-          console.log(`🔁 Alert deduped: ${alertType} (ID: ${existing._id}, count: ${existing.occurrenceCount})`);
-          return;
-        }
-
         const mitre = mapToMitre(alertType);
         const severity = scoreAlertSeverity({
           type: alertType,
@@ -192,57 +75,38 @@ function connectToKismet(io, retryCount = 0) {
           occurrenceCount: 1
         });
 
-        const alert = await Alert.create({
+        const newAlert = await Alert.create({
           type: alertType,
           source_mac: sourceMac,
           dest_mac: destMac,
-          bssid,
           channel,
           frequency,
           signal,
-          timestamp: now,
+          timestamp: new Date(Number(timestamp)),
           source: "kismet",
-          firstSeen: now,
-          lastSeen: now,
+          firstSeen: new Date(),
+          lastSeen: new Date(),
           occurrenceCount: 1,
           severityScore: severity.severityScore,
           severityLevel: severity.severityLevel,
-          mitre
+          mitre,
+          text
         });
-
-        // Broadcast to all connected clients
-        io.emit("new-alert", alert);
-
-        console.log(`🚨 Alert stored: ${alertType} (ID: ${alert._id})`);
-
+        io.emit("new-alert", newAlert);
+        console.log(`🚨 Alert stored: ${alertType} (ID: ${newAlert._id})`);
       } catch (err) {
-        console.error("❌ Error processing Kismet alert:", err.message);
-
-        // If database error, still log the alert data
-        if (err.name === 'ValidationError' || err.name === 'MongoError') {
-          console.error("Database error. Alert data:", msg.toString().substring(0, 200));
-        }
+        console.error("[Kismet REST] Error storing alert:", err.message);
       }
-    });
-
-  } catch (err) {
-    console.error("❌ Failed to create Kismet WebSocket:", err.message);
-
-    // Retry connection
-    if (retryCount < maxRetries) {
-      reconnectTimeout = setTimeout(() => {
-        connectToKismet(io, retryCount + 1);
-      }, retryDelay);
     }
+  }, pollInterval * 1000);
+  console.log(`[Kismet REST] Polling for alerts every ${pollInterval} seconds...`);
+}
+
+function stopKismetListener() {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
   }
 }
 
-// Graceful shutdown
-export function stopKismetListener() {
-  if (reconnectTimeout) {
-    clearTimeout(reconnectTimeout);
-  }
-  if (ws) {
-    ws.close();
-  }
-}
+module.exports = { startKismetListener, stopKismetListener };

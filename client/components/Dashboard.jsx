@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { io } from "socket.io-client";
 import ChatInterface from "./ChatInterface";
-import { withSecurityHeaders } from "../src/apiSecurity";
+import { withSecurityHeaders, getApiUrl, getSocketUrl } from "../src/apiSecurity";
 import "./dashboard.css";
 
 const DEFAULT_FILTERS = {
@@ -59,7 +59,8 @@ function Dashboard() {
       if (filters.correlatedOnly) params.set("correlatedOnly", "true");
 
       const query = params.toString();
-      const url = query ? `http://localhost:5000/alerts?${query}` : "http://localhost:5000/alerts";
+      const baseAlertsUrl = getApiUrl("alerts");
+      const url = query ? `${baseAlertsUrl}?${query}` : baseAlertsUrl;
 
       const res = await fetch(url, {
         headers: withSecurityHeaders(),
@@ -102,7 +103,7 @@ function Dashboard() {
     try {
       setActionLoading(true);
       setError("");
-      const res = await fetch("http://localhost:5000/alerts/reset", {
+      const res = await fetch(getApiUrl("alerts/reset"), {
         method: "DELETE",
         headers: withSecurityHeaders()
       });
@@ -123,7 +124,7 @@ function Dashboard() {
     try {
       setActionLoading(true);
       setError("");
-      const res = await fetch(`http://localhost:5000/alerts/test?type=${type}`, {
+      const res = await fetch(`${getApiUrl("alerts/test")}?type=${type}`, {
         headers: withSecurityHeaders()
       });
       if (!res.ok) {
@@ -143,7 +144,7 @@ function Dashboard() {
   }, [fetchAlerts]);
 
   useEffect(() => {
-    const socket = io("http://localhost:5000", {
+    const socket = io(getSocketUrl(), {
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,

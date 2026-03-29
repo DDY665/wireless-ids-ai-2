@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
-import { withSecurityHeaders } from "../src/apiSecurity";
+import { withSecurityHeaders, getApiUrl } from "../src/apiSecurity";
 import "./chat-interface.css";
 
 function ChatInterface({ alertId = null, alertContext = null }) {
@@ -37,7 +37,7 @@ function ChatInterface({ alertId = null, alertContext = null }) {
       }
 
       try {
-        const res = await fetch(`http://localhost:5000/ai/chat-history/${alertId}`, {
+        const res = await fetch(getApiUrl(`ai/chat-history/${alertId}`), {
           headers: withSecurityHeaders(),
           signal: AbortSignal.timeout(10000)
         });
@@ -94,7 +94,7 @@ function ChatInterface({ alertId = null, alertContext = null }) {
         content: msg.content
       }));
 
-      const res = await fetch("http://localhost:5000/ai/chat", {
+      const res = await fetch(getApiUrl("ai/chat"), {
         method: "POST",
         headers: withSecurityHeaders({
           "Content-Type": "application/json"
@@ -141,7 +141,7 @@ function ChatInterface({ alertId = null, alertContext = null }) {
     if (!window.confirm("Clear all conversation history for this alert?")) return;
 
     try {
-      const res = await fetch(`http://localhost:5000/ai/chat-history/${alertId}`, {
+      const res = await fetch(getApiUrl(`ai/chat-history/${alertId}`), {
         method: "DELETE",
         headers: withSecurityHeaders()
       });
