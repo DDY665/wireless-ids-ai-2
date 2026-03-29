@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+// ...existing code...
+import React, { useCallback, useEffect, useState } from "react";
 import { io } from "socket.io-client";
 import ChatInterface from "./ChatInterface";
 import { withSecurityHeaders, getApiUrl, getSocketUrl } from "../src/apiSecurity";
@@ -31,7 +32,6 @@ function Dashboard() {
   useEffect(() => {
     document.body.classList.remove("wi-theme-light", "wi-theme-dark");
     document.body.classList.add(theme === "dark" ? "wi-theme-dark" : "wi-theme-light");
-
     return () => {
       document.body.classList.remove("wi-theme-light", "wi-theme-dark");
     };
@@ -49,7 +49,6 @@ function Dashboard() {
     try {
       setLoading(true);
       setError("");
-
       const params = new URLSearchParams();
       if (filters.status !== "all") params.set("status", filters.status);
       if (filters.severityLevel !== "all") params.set("severityLevel", filters.severityLevel);
@@ -57,16 +56,13 @@ function Dashboard() {
       if (filters.mitreTechnique.trim()) params.set("mitreTechnique", filters.mitreTechnique.trim());
       if (filters.search.trim()) params.set("search", filters.search.trim());
       if (filters.correlatedOnly) params.set("correlatedOnly", "true");
-
       const query = params.toString();
       const baseAlertsUrl = getApiUrl("alerts");
       const url = query ? `${baseAlertsUrl}?${query}` : baseAlertsUrl;
-
       const res = await fetch(url, {
         headers: withSecurityHeaders(),
         signal: AbortSignal.timeout(10000)
       });
-
       if (!res.ok) {
         const statusText = res.status === 404
           ? "Endpoint not found"
@@ -77,7 +73,6 @@ function Dashboard() {
               : `Server returned ${res.status}`;
         throw new Error(statusText);
       }
-
       const data = await res.json();
       setAlerts(data);
       setSelectedAlert((prev) => {
@@ -120,25 +115,6 @@ function Dashboard() {
     }
   }
 
-  async function createTestAlert(type) {
-    try {
-      setActionLoading(true);
-      setError("");
-      const res = await fetch(`${getApiUrl("alerts/test")}?type=${type}`, {
-        headers: withSecurityHeaders()
-      });
-      if (!res.ok) {
-        throw new Error(`Failed to create test alert (${res.status})`);
-      }
-      await fetchAlerts();
-    } catch (err) {
-      console.error(err);
-      setError(err.message || "Failed to create test alert");
-    } finally {
-      setActionLoading(false);
-    }
-  }
-
   useEffect(() => {
     fetchAlerts();
   }, [fetchAlerts]);
@@ -150,24 +126,19 @@ function Dashboard() {
       reconnectionDelayMax: 5000,
       reconnectionAttempts: 10
     });
-
     socket.on("connect", () => {
       setSocketConnected(true);
       setError("");
     });
-
     socket.on("disconnect", () => {
       setSocketConnected(false);
     });
-
     socket.on("reconnect_attempt", (attemptNumber) => {
       console.log(`Attempting to reconnect (${attemptNumber})...`);
     });
-
     socket.on("reconnect_failed", () => {
       setError("Failed to reconnect to server after multiple attempts");
     });
-
     socket.on("new-alert", (alert) => {
       try {
         fetchAlerts();
@@ -178,18 +149,15 @@ function Dashboard() {
         console.error("Error handling new alert:", err);
       }
     });
-
     socket.on("connect_error", (err) => {
       console.error("Socket connection error:", err.message);
       setError("Real-time connection failed. Updates may be delayed.");
     });
-
     return () => socket.close();
   }, [fetchAlerts, selectedAlert]);
 
   const getAlertSeverity = (alert) => {
     if (alert?.severityLevel) return alert.severityLevel;
-
     const type = alert?.type;
     const highSeverity = ["DEAUTHFLOOD", "DISASSOCFLOOD", "BSSTIMESTAMP"];
     const mediumSeverity = ["BEACONFLOOD", "NULLPROBERESP"];
@@ -199,7 +167,6 @@ function Dashboard() {
   };
 
   const closeMobileSetup = () => setMobileSetupOpen(false);
-
   const toggleTheme = () => {
     setTheme((prev) => {
       const next = prev === "dark" ? "light" : "dark";
@@ -218,7 +185,6 @@ function Dashboard() {
             <div className="wi-brand-sub">AI Incident Assistant</div>
           </div>
         </div>
-
         <div className="wi-header-right">
           <button
             className="wi-theme-toggle"
@@ -236,7 +202,6 @@ function Dashboard() {
           </div>
         </div>
       </header>
-
       <div className="wi-mobile-bar">
         <button className="wi-btn wi-btn-neutral" onClick={() => setMobileSetupOpen(true)} type="button">
           Alerts Panel
@@ -250,10 +215,8 @@ function Dashboard() {
           Refresh
         </button>
       </div>
-
       <main className="wi-main-shell">
         <div className={`wi-overlay ${mobileSetupOpen ? "is-open" : ""}`} onClick={closeMobileSetup} />
-
         {!sidebarCollapsed && (
           <aside className={`wi-left-panel ${mobileSetupOpen ? "is-open" : ""}`}>
             <section className="wi-panel-card">
@@ -270,7 +233,6 @@ function Dashboard() {
                     <option value="false_positive">False Positive</option>
                   </select>
                 </label>
-
                 <label className="wi-field">
                   <span>Severity</span>
                   <select
@@ -284,7 +246,6 @@ function Dashboard() {
                     <option value="critical">Critical</option>
                   </select>
                 </label>
-
                 <label className="wi-field">
                   <span>Source</span>
                   <select value={filters.source} onChange={(e) => setFilters((prev) => ({ ...prev, source: e.target.value }))}>
@@ -294,7 +255,6 @@ function Dashboard() {
                     <option value="manual">Manual</option>
                   </select>
                 </label>
-
                 <label className="wi-field wi-field-wide">
                   <span>Search</span>
                   <input
@@ -304,7 +264,6 @@ function Dashboard() {
                     placeholder="Type, MAC, BSSID, MITRE..."
                   />
                 </label>
-
                 <label className="wi-field wi-field-wide">
                   <span>MITRE Technique</span>
                   <input
@@ -314,7 +273,6 @@ function Dashboard() {
                     placeholder="e.g. T1499"
                   />
                 </label>
-
                 <label className="wi-check-field">
                   <input
                     type="checkbox"
@@ -324,7 +282,6 @@ function Dashboard() {
                   Correlated only
                 </label>
               </div>
-
               <div className="wi-row-actions">
                 <button
                   className="wi-btn wi-btn-neutral"
@@ -339,28 +296,22 @@ function Dashboard() {
                 </button>
               </div>
             </section>
-
-            <section className="wi-panel-card wi-panel-actions">
-              <p className="wi-panel-title">Simulation & Control</p>
-              <div className="wi-row-actions">
-                <button className="wi-btn wi-btn-primary" onClick={() => createTestAlert("SSIDCONFLICT")} disabled={actionLoading} type="button">
-                  + SSID Attack
-                </button>
-                <button className="wi-btn wi-btn-primary" onClick={() => createTestAlert("BEACONFLOOD")} disabled={actionLoading} type="button">
-                  + Beacon Flood
-                </button>
-              </div>
-              <button className="wi-btn wi-btn-danger wi-btn-full" onClick={clearAlerts} disabled={actionLoading} type="button">
-                Clear All Alerts
-              </button>
-            </section>
-
             <section className="wi-panel-card wi-alerts-card">
-              <div className="wi-alerts-head">
-                <p className="wi-panel-title">Threat Alerts</p>
-                <span className="wi-count-pill">{alerts.length}</span>
+              <div className="wi-alerts-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                  <p className="wi-panel-title" style={{ marginRight: 8 }}>Threat Alerts</p>
+                  <span className="wi-count-pill">{alerts.length}</span>
+                </div>
+                <button
+                  className="wi-btn wi-btn-danger"
+                  style={{ marginLeft: 8, padding: '2px 10px', fontSize: '0.95em' }}
+                  onClick={clearAlerts}
+                  disabled={actionLoading || alerts.length === 0}
+                  type="button"
+                >
+                  Clear All
+                </button>
               </div>
-
               <div className={`wi-alert-list ${alerts.length > 2 ? "is-scrollable" : ""}`}>
                 {loading ? (
                   <div className="wi-empty-state">
@@ -373,10 +324,18 @@ function Dashboard() {
                     <p>No threats detected</p>
                   </div>
                 ) : (
-                  alerts.map((alert) => {
+                  // Deduplicate alerts by type, show the most recent alert for each type
+                  Array.from(
+                    alerts
+                      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+                      .reduce((map, alert) => {
+                        if (!map.has(alert.type)) map.set(alert.type, alert);
+                        return map;
+                      }, new Map())
+                      .values()
+                  ).map((alert) => {
                     const severity = getAlertSeverity(alert);
                     const isSelected = selectedAlert?._id === alert._id;
-
                     return (
                       <button
                         key={alert._id}
@@ -396,12 +355,10 @@ function Dashboard() {
                             })}
                           </span>
                         </div>
-
                         <div className="wi-alert-type">
                           {alert.type}
                           {alert.correlationCount > 1 ? <span className="wi-corr-badge"> 🔗 {alert.correlationCount}</span> : null}
                         </div>
-
                         <div className="wi-alert-meta">
                           <span>Signal: {alert.signal} dBm</span>
                           {alert.mitre?.technique_id ? <span>MITRE: {alert.mitre.technique_id}</span> : null}
@@ -414,14 +371,9 @@ function Dashboard() {
             </section>
           </aside>
         )}
-
         <section className="wi-right-panel">
           <div className="wi-right-toolbar">
-            <div className="wi-right-toolbar-left">
-              <button className="wi-btn wi-btn-neutral" onClick={() => setSidebarCollapsed((prev) => !prev)} type="button">
-                {sidebarCollapsed ? "Show Alerts Panel" : "Hide Alerts Panel"}
-              </button>
-            </div>
+            {/* Removed Show Alerts Panel button */}
             <div className="wi-right-toolbar-mid">
               {alerts.length} {alerts.length === 1 ? "Alert" : "Alerts"} {hasActiveFilters ? "Matched" : "Detected"}
             </div>
@@ -431,22 +383,23 @@ function Dashboard() {
               </button>
             </div>
           </div>
-
           {error ? (
             <div className="wi-error-banner">⚠ {error}</div>
           ) : null}
-
           <div className="wi-chat-shell">
             {selectedAlert ? (
-              <ChatInterface
-                alertId={selectedAlert._id}
-                alertContext={{
-                  type: selectedAlert.type,
-                  signal: selectedAlert.signal,
-                  mitre: selectedAlert.mitre,
-                  timestamp: selectedAlert.timestamp
-                }}
-              />
+              <>
+                <AlertDetailsToggle alert={selectedAlert} />
+                <ChatInterface
+                  alertId={selectedAlert._id}
+                  alertContext={{
+                    type: selectedAlert.type,
+                    signal: selectedAlert.signal,
+                    mitre: selectedAlert.mitre,
+                    timestamp: selectedAlert.timestamp
+                  }}
+                />
+              </>
             ) : (
               <div className="wi-chat-empty">
                 <div className="wi-chat-empty-icon">💬</div>
@@ -457,6 +410,32 @@ function Dashboard() {
           </div>
         </section>
       </main>
+    </div>
+  );
+}
+
+function AlertDetailsToggle({ alert }) {
+  const [showDetails, setShowDetails] = useState(false);
+  return (
+    <div style={{ marginBottom: "1rem", textAlign: "right" }}>
+      {/* Removed Show Alert Details button */}
+      {showDetails && (
+        <div className="wi-alert-details-panel" style={{ border: "1px solid #444", borderRadius: 8, padding: 16, background: "#181c20", marginTop: 8, marginBottom: 8, maxWidth: 480, marginLeft: "auto", marginRight: 0 }}>
+          <h3 style={{ marginTop: 0 }}>Alert Details</h3>
+          <ul className="wi-alert-details-list" style={{ listStyle: "none", padding: 0, margin: 0 }}>
+            <li><b>Type:</b> {alert.type}</li>
+            <li><b>Severity:</b> {alert.severityLevel || 'N/A'}</li>
+            <li><b>Signal:</b> {alert.signal} dBm</li>
+            <li><b>Source MAC:</b> {alert.source_mac}</li>
+            <li><b>Dest MAC:</b> {alert.dest_mac}</li>
+            <li><b>BSSID:</b> {alert.bssid}</li>
+            <li><b>Channel:</b> {alert.channel}</li>
+            <li><b>Timestamp:</b> {new Date(alert.timestamp).toLocaleString()}</li>
+            <li><b>MITRE:</b> {alert.mitre?.technique_id || 'N/A'} {alert.mitre?.name ? `- ${alert.mitre.name}` : ''}</li>
+            <li><b>Description:</b> {alert.text}</li>
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

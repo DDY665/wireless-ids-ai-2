@@ -13,7 +13,8 @@ function getKismetConfig() {
   return {
     host: process.env.KISMET_HOST || "localhost",
     port: process.env.KISMET_PORT || 2501,
-    apiKey: process.env.KISMET_API_KEY || "",
+    user: process.env.KISMET_USER || "",
+    password: process.env.KISMET_PASSWORD || "",
     endpoint: process.env.KISMET_ALERTS_ENDPOINT || "/alerts/all_alerts.json"
   };
 }
@@ -28,11 +29,11 @@ function getAlertId(alert) {
 }
 
 async function fetchKismetAlerts() {
-  const { host, port, apiKey, endpoint } = getKismetConfig();
+  const { host, port, user, password, endpoint } = getKismetConfig();
   const url = `http://${host}:${port}${endpoint}`;
   try {
     const response = await axios.get(url, {
-      headers: apiKey ? { "KISMET-API-KEY": apiKey } : {},
+      auth: user && password ? { username: user, password: password } : undefined,
       timeout: 5000
     });
     if (Array.isArray(response.data)) {
@@ -63,7 +64,8 @@ function startKismetListener(io) {
       const channel = alert["kismet.alert.channel"] || null;
       const frequency = alert["kismet.alert.frequency"] || null;
       const signal = alert["kismet.alert.signal_dbm"] || 0;
-      const timestamp = alert["kismet.alert.timestamp"] || Date.now();
+      // Always use current time for alert timestamp
+      const timestamp = Date.now();
       const text = alert["kismet.alert.text"] || "No description";
 
       // Store in DB and emit to clients
